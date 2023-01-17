@@ -101,55 +101,24 @@ func (app *Acceptor) OnLogout(sessionID quickfix.SessionID) {
 
 // Notification of admin message being sent to target.
 func (app *Acceptor) ToAdmin(message *quickfix.Message, sessionID quickfix.SessionID) {
-	app.Logger.Debug().Msgf("-> Sending message to admin")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, true)
 }
 
 // Notification of admin message being received from target.
 func (app *Acceptor) FromAdmin(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.Logger.Debug().Msgf("<- Message received from admin %s", sessionID)
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
-
 	return nil
 }
 
 // Notification of app message being sent to target.
 func (app *Acceptor) ToApp(message *quickfix.Message, sessionID quickfix.SessionID) error {
-	app.Logger.Debug().Msgf("-> Sending message to app")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, true)
-
 	return nil
 }
 
 // Notification of app message being received from target.
 func (app *Acceptor) FromApp(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.Logger.Debug().Msgf("<- Message received from app %s", sessionID)
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, true)
-
 	return app.router.Route(message, sessionID)
 }
 

@@ -190,8 +190,6 @@ func (app *MarketDataValidator) OnLogout(sessionID quickfix.SessionID) {
 
 // Notification of admin message being sent to target.
 func (app *MarketDataValidator) ToAdmin(message *quickfix.Message, sessionID quickfix.SessionID) {
-	app.Logger.Debug().Msgf("-> Sending message to admin")
-
 	typ, err := message.MsgType()
 	if err != nil {
 		app.Logger.Error().Msgf("Message type error: %s", err)
@@ -223,35 +221,19 @@ func (app *MarketDataValidator) ToAdmin(message *quickfix.Message, sessionID qui
 
 // Notification of admin message being received from target.
 func (app *MarketDataValidator) FromAdmin(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.Logger.Debug().Msgf("<- Message received from admin")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
-
 	return nil
 }
 
 // Notification of app message being sent to target.
 func (app *MarketDataValidator) ToApp(message *quickfix.Message, sessionID quickfix.SessionID) error {
-	app.Logger.Debug().Msgf("-> Sending message to app")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, true)
-
 	return nil
 }
 
 // Notification of app message being received from target.
 func (app *MarketDataValidator) FromApp(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.Logger.Debug().Msgf("<- Message received from app")
+	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	msgType, err := message.MsgType()
 	if err != nil {
@@ -261,7 +243,6 @@ func (app *MarketDataValidator) FromApp(message *quickfix.Message, sessionID qui
 
 	switch msgType {
 	case string(enum.MsgType_BUSINESS_MESSAGE_REJECT):
-		app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 		app.Connected <- struct{}{}
 		return nil
 	case string(enum.MsgType_SECURITY_LIST):
@@ -277,8 +258,6 @@ func (app *MarketDataValidator) FromApp(message *quickfix.Message, sessionID qui
 		}
 		return nil
 	}
-
-	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	return app.router.Route(message, sessionID)
 }

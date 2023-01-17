@@ -84,8 +84,6 @@ func (app *Initiator) ToAdmin(message *quickfix.Message, sessionID quickfix.Sess
 	app.mux.Lock()
 	defer app.mux.Unlock()
 
-	app.LogMessageType(message, sessionID, "-> Sending message to admin:    ")
-
 	typ, err := message.MsgType()
 	if err != nil {
 		app.Logger.Error().Msgf("Message type error: %s", err)
@@ -117,33 +115,12 @@ func (app *Initiator) ToAdmin(message *quickfix.Message, sessionID quickfix.Sess
 
 // Notification of admin message being received from target.
 func (app *Initiator) FromAdmin(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.mux.Lock()
-	defer app.mux.Unlock()
-
-	app.LogMessageType(message, sessionID, "<- Message received from admin: ")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
-
 	return nil
 }
 
 // Notification of app message being sent to target.
 func (app *Initiator) ToApp(message *quickfix.Message, sessionID quickfix.SessionID) error {
-	app.mux.RLock()
-	defer app.mux.RUnlock()
-
-	app.LogMessageType(message, sessionID, "-> Sending message to app:      ")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.InfoLevel, message, sessionID, true)
 
 	app.mux.RLock()
@@ -160,16 +137,6 @@ func (app *Initiator) ToApp(message *quickfix.Message, sessionID quickfix.Sessio
 
 // Notification of app message being received from target.
 func (app *Initiator) FromApp(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.mux.RLock()
-	defer app.mux.RUnlock()
-
-	app.LogMessageType(message, sessionID, "<- Message received from app:   ")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.InfoLevel, message, sessionID, false)
 
 	app.mux.RLock()

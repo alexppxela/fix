@@ -70,8 +70,6 @@ func (app *SecurityStatusRequest) OnLogout(sessionID quickfix.SessionID) {
 
 // Notification of admin message being sent to target.
 func (app *SecurityStatusRequest) ToAdmin(message *quickfix.Message, sessionID quickfix.SessionID) {
-	app.Logger.Debug().Msgf("-> Sending message to admin")
-
 	typ, err := message.MsgType()
 	if err != nil {
 		app.Logger.Error().Msgf("Message type error: %s", err)
@@ -103,14 +101,12 @@ func (app *SecurityStatusRequest) ToAdmin(message *quickfix.Message, sessionID q
 
 // Notification of admin message being received from target.
 func (app *SecurityStatusRequest) FromAdmin(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.Logger.Debug().Msgf("<- Message received from admin")
+	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	typ, err := message.MsgType()
 	if err != nil {
 		app.Logger.Error().Msgf("Message type error: %s", err)
 	}
-
-	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	switch typ {
 	case string(enum.MsgType_REJECT):
@@ -122,28 +118,18 @@ func (app *SecurityStatusRequest) FromAdmin(message *quickfix.Message, sessionID
 
 // Notification of app message being sent to target.
 func (app *SecurityStatusRequest) ToApp(message *quickfix.Message, sessionID quickfix.SessionID) error {
-	app.Logger.Debug().Msgf("-> Sending message to app")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, true)
-
 	return nil
 }
 
 // Notification of app message being received from target.
 func (app *SecurityStatusRequest) FromApp(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.Logger.Debug().Msgf("<- Message received from app")
+	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	typ, err := message.MsgType()
 	if err != nil {
 		app.Logger.Error().Msgf("Message type error: %s", err)
 	}
-
-	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	app.mux.RLock()
 	if app.stopped {

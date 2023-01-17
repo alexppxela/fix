@@ -70,7 +70,7 @@ func (app *CancelOrder) OnLogout(sessionID quickfix.SessionID) {
 
 // Notification of admin message being sent to target.
 func (app *CancelOrder) ToAdmin(message *quickfix.Message, sessionID quickfix.SessionID) {
-	app.Logger.Debug().Msgf("-> Sending message to admin")
+	app.LogMessage(zerolog.TraceLevel, message, sessionID, true)
 
 	typ, err := message.MsgType()
 	if err != nil {
@@ -92,7 +92,6 @@ func (app *CancelOrder) ToAdmin(message *quickfix.Message, sessionID quickfix.Se
 		}
 	}
 
-	app.LogMessage(zerolog.TraceLevel, message, sessionID, true)
 }
 
 func (app *CancelOrder) treatMessageByType(message *quickfix.Message, f func(enum.MsgType, *quickfix.Message)) {
@@ -106,7 +105,6 @@ func (app *CancelOrder) treatMessageByType(message *quickfix.Message, f func(enu
 
 // Notification of admin message being received from target.
 func (app *CancelOrder) FromAdmin(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.Logger.Debug().Msgf("<- Message received from admin")
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	app.treatMessageByType(message, func(msgType enum.MsgType, _ *quickfix.Message) {
@@ -120,22 +118,12 @@ func (app *CancelOrder) FromAdmin(message *quickfix.Message, sessionID quickfix.
 
 // Notification of app message being sent to target.
 func (app *CancelOrder) ToApp(message *quickfix.Message, sessionID quickfix.SessionID) error {
-	app.Logger.Debug().Msgf("-> Sending message to app")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, true)
-
 	return nil
 }
 
 // Notification of app message being received from target.
 func (app *CancelOrder) FromApp(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.Logger.Debug().Msgf("<- Message received from app")
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	app.mux.RLock()

@@ -70,8 +70,6 @@ func (app *SecurityList) OnLogout(sessionID quickfix.SessionID) {
 
 // Notification of admin message being sent to target.
 func (app *SecurityList) ToAdmin(message *quickfix.Message, sessionID quickfix.SessionID) {
-	app.Logger.Debug().Msgf("-> Sending message to admin")
-
 	typ, err := message.MsgType()
 	if err != nil {
 		app.Logger.Error().Msgf("Message type error: %s", err)
@@ -103,14 +101,12 @@ func (app *SecurityList) ToAdmin(message *quickfix.Message, sessionID quickfix.S
 
 // Notification of admin message being received from target.
 func (app *SecurityList) FromAdmin(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.Logger.Debug().Msgf("<- Message received from admin")
+	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	typ, err := message.MsgType()
 	if err != nil {
 		app.Logger.Error().Msgf("Message type error: %s", err)
 	}
-
-	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	app.mux.RLock()
 	if app.stopped {
@@ -129,28 +125,18 @@ func (app *SecurityList) FromAdmin(message *quickfix.Message, sessionID quickfix
 
 // Notification of app message being sent to target.
 func (app *SecurityList) ToApp(message *quickfix.Message, sessionID quickfix.SessionID) error {
-	app.Logger.Debug().Msgf("-> Sending message to app")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, true)
-
 	return nil
 }
 
 // Notification of app message being received from target.
 func (app *SecurityList) FromApp(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.Logger.Debug().Msgf("<- Message received from app")
+	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	typ, err := message.MsgType()
 	if err != nil {
 		app.Logger.Error().Msgf("Message type error: %s", err)
 	}
-
-	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	app.mux.RLock()
 	if app.stopped {

@@ -87,8 +87,6 @@ func (app *MarketDataRequest) OnLogout(sessionID quickfix.SessionID) {
 
 // Notification of admin message being sent to target.
 func (app *MarketDataRequest) ToAdmin(message *quickfix.Message, sessionID quickfix.SessionID) {
-	app.LogMessageType(message, sessionID, "-> Sending message to admin:    ")
-
 	typ, err := message.MsgType()
 	if err != nil {
 		app.Logger.Error().Msgf("Message type error: %s", err)
@@ -120,14 +118,12 @@ func (app *MarketDataRequest) ToAdmin(message *quickfix.Message, sessionID quick
 
 // Notification of admin message being received from target.
 func (app *MarketDataRequest) FromAdmin(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.LogMessageType(message, sessionID, "<- Message received from admin: ")
+	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	typ, err := message.MsgType()
 	if err != nil {
 		app.Logger.Error().Msgf("Message type error: %s", err)
 	}
-
-	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 
 	switch typ {
 	case string(enum.MsgType_REJECT):
@@ -139,29 +135,13 @@ func (app *MarketDataRequest) FromAdmin(message *quickfix.Message, sessionID qui
 
 // Notification of app message being sent to target.
 func (app *MarketDataRequest) ToApp(message *quickfix.Message, sessionID quickfix.SessionID) error {
-	app.LogMessageType(message, sessionID, "-> Sending message to app:      ")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, true)
-
 	return nil
 }
 
 // Notification of app message being received from target.
 func (app *MarketDataRequest) FromApp(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.LogMessageType(message, sessionID, "<- Message received from app:   ")
-
-	_, err := message.MsgType()
-	if err != nil {
-		app.Logger.Error().Msgf("Message type error: %s", err)
-	}
-
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
-
 	return app.router.Route(message, sessionID)
 }
 
