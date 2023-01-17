@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -78,51 +77,61 @@ func (app *QuickFixAppMessageLogger) LogMessage(level zerolog.Level, message *qu
 		}
 	}
 
-	fields := loggedMessage.GetFields()
+	// fields := loggedMessage.GetFields()
 
-	parts := []struct {
-		prefix string
-		fm     quickfix.FieldMap
-		dict   *datadictionary.DataDictionary
-	}{
-		{"Headers: ", loggedMessage.Header.FieldMap, app.TransportDataDictionary},
-		{"Body:    ", loggedMessage.Body.FieldMap, app.AppDataDictionary},
-		{"Trailers:", loggedMessage.Trailer.FieldMap, app.TransportDataDictionary},
+	formatStr := "<- %s %s"
+	if sending {
+		formatStr = "-> %s %s"
 	}
-	for _, part := range parts {
-		if len(part.fm.Tags()) == 0 {
-			continue
-		}
 
-		w := bytes.NewBuffer([]byte{})
-		bw := bufio.NewWriter(w)
-		br := bufio.NewReader(w)
+	// parts := []struct {
+	// 	prefix string
+	// 	fm     quickfix.FieldMap
+	// 	dict   *datadictionary.DataDictionary
+	// }{
+	// 	{"Headers: ", loggedMessage.Header.FieldMap, app.TransportDataDictionary},
+	// 	{"Body:    ", loggedMessage.Body.FieldMap, app.AppDataDictionary},
+	// 	{"Trailers:", loggedMessage.Trailer.FieldMap, app.TransportDataDictionary},
+	// }
+	// for _, part := range parts {
+	// 	if len(part.fm.Tags()) == 0 {
+	// 		continue
+	// 	}
 
-		skipped := 0
-		for i, field := range fields {
-			if !part.fm.Has(field.Tag()) {
-				skipped++
-				continue
-			}
+	// 	w := bytes.NewBuffer([]byte{})
+	// 	bw := bufio.NewWriter(w)
+	// 	br := bufio.NewReader(w)
 
-			if i-skipped > 0 {
-				bw.Write([]byte(","))
-			}
+	// 	skipped := 0
+	// 	for i, field := range fields {
+	// 		if !part.fm.Has(field.Tag()) {
+	// 			skipped++
+	// 			continue
+	// 		}
 
-			app.WriteField(bw, field)
+	// 		if i-skipped > 0 {
+	// 			bw.Write([]byte(","))
+	// 		}
 
-			bw.Flush()
-		}
+	// 		app.WriteField(bw, field)
 
-		str, _ := io.ReadAll(br)
+	// 		bw.Flush()
+	// 	}
 
-		formatStr := "<- %s %s"
-		if sending {
-			formatStr = "-> %s %s"
-		}
+	// 	str, _ := io.ReadAll(br)
 
-		app.Logger.WithLevel(level).Msgf(formatStr, part.prefix, str)
-	}
+	// 	app.Logger.WithLevel(level).Msgf(formatStr, part.prefix, str)
+	// }
+
+	// msgType, err := message.Header.GetString(tag.MsgType)
+	// if err != nil {
+	// 	app.Logger.Error().Err(err).Str("message", message.String()).Msgf("message received without msg type")
+	// }
+	// if true && msgType == "X" {
+	// 	msg := message.String()
+	// 	app.Logger.WithLevel(level).Msgf(formatStr, "Raw", strings.Replace(msg, "\001", "|", -1))
+	// }
+	app.Logger.WithLevel(level).Msgf(formatStr, "Raw", strings.Replace(message.String(), "\001", "|", -1))
 }
 
 func (app *QuickFixAppMessageLogger) WriteField(w io.Writer, field quickfix.TagValue) {

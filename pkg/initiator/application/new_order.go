@@ -111,7 +111,7 @@ func (app *NewOrder) FromAdmin(message *quickfix.Message, sessionID quickfix.Ses
 
 // Notification of app message being sent to target.
 func (app *NewOrder) ToApp(message *quickfix.Message, sessionID quickfix.SessionID) error {
-	app.Logger.Debug().Msgf("-> Sending message to app")
+	// app.Logger.Debug().Msgf("-> Sending message to app")
 
 	_, err := message.MsgType()
 	if err != nil {
@@ -125,7 +125,7 @@ func (app *NewOrder) ToApp(message *quickfix.Message, sessionID quickfix.Session
 
 // Notification of app message being received from target.
 func (app *NewOrder) FromApp(message *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	app.Logger.Debug().Msgf("<- Message received from app")
+	// app.Logger.Debug().Msgf("<- Message received from app")
 
 	typ, err := message.MsgType()
 	if err != nil {
