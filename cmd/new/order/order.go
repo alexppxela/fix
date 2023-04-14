@@ -44,6 +44,7 @@ var (
 	optionUpdatePeriod               time.Duration
 	optionUpdateOrderQuantity        float64
 	optionUpdateOrderPrice           float64
+	optionUpdateFillOrderId          bool
 )
 
 var NewOrderCmd = &cobra.Command{
@@ -77,6 +78,7 @@ func init() {
 	NewOrderCmd.Flags().DurationVar(&optionUpdatePeriod, "update-period", 0, "Period for recurring order price/quantity updates")
 	NewOrderCmd.Flags().Float64Var(&optionUpdateOrderQuantity, "update-order-quantity", 0.0, "Update order quantity after each period")
 	NewOrderCmd.Flags().Float64Var(&optionUpdateOrderPrice, "update-order-price", 0.0, "Update order price after each period")
+	NewOrderCmd.Flags().BoolVar(&optionUpdateFillOrderId, "updated-fill-order-id", false, "Fill OrderID FIX field on update")
 
 	NewOrderCmd.MarkFlagRequired("side")
 	NewOrderCmd.MarkFlagRequired("type")
@@ -408,7 +410,9 @@ func buildCancelReplaceMessage(session config.Session, executionReport *quickfix
 		switch session.DefaultApplVerID {
 		case "FIX.5.0SP2":
 			header.Set(field.NewMsgType(enum.MsgType_ORDER_CANCEL_REPLACE_REQUEST))
-			message.Body.Set(orderId)
+			if optionUpdateFillOrderId {
+				message.Body.Set(orderId)
+			}
 			message.Body.Set(clOrdId)
 			message.Body.Set(origClOrdId)
 			message.Body.Set(ordSide)
