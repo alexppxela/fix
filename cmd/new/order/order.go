@@ -45,6 +45,7 @@ var (
 	optionUpdateOrderQuantity        float64
 	optionUpdateOrderPrice           float64
 	optionUpdateFillOrderId          bool
+	optionCancelInsteadOfUpdate      bool
 )
 
 var NewOrderCmd = &cobra.Command{
@@ -79,6 +80,7 @@ func init() {
 	NewOrderCmd.Flags().Float64Var(&optionUpdateOrderQuantity, "update-order-quantity", 0.0, "Update order quantity after each period")
 	NewOrderCmd.Flags().Float64Var(&optionUpdateOrderPrice, "update-order-price", 0.0, "Update order price after each period")
 	NewOrderCmd.Flags().BoolVar(&optionUpdateFillOrderId, "updated-fill-order-id", false, "Fill OrderID FIX field on update")
+	NewOrderCmd.Flags().BoolVar(&optionCancelInsteadOfUpdate, "cancel-on-update", false, "Cancel order and mass cancel several times instead of update")
 
 	NewOrderCmd.MarkFlagRequired("side")
 	NewOrderCmd.MarkFlagRequired("type")
@@ -244,6 +246,59 @@ LOOP:
 			break LOOP
 
 		case <-updatePeriod:
+			if optionCancelInsteadOfUpdate {
+				orderCancelMsg1, err := buildCancelMessage(*session, lastExecutionReport)
+				if err != nil {
+					return err
+				}
+				orderCancelMsg2, err := buildCancelMessage(*session, lastExecutionReport)
+				if err != nil {
+					return err
+				}
+				orderCancelMsg3, err := buildCancelMessage(*session, lastExecutionReport)
+				if err != nil {
+					return err
+				}
+				orderCancelMsg4, err := buildCancelMessage(*session, lastExecutionReport)
+				if err != nil {
+					return err
+				}
+				orderMassCancelMsg1, err := buildMassCancelMessage(*session)
+				if err != nil {
+					return err
+				}
+				orderMassCancelMsg2, err := buildMassCancelMessage(*session)
+				if err != nil {
+					return err
+				}
+
+				err = quickfix.Send(orderCancelMsg1)
+				if err != nil {
+					return err
+				}
+				err = quickfix.Send(orderCancelMsg2)
+				if err != nil {
+					return err
+				}
+				err = quickfix.Send(orderMassCancelMsg1)
+				if err != nil {
+					return err
+				}
+				err = quickfix.Send(orderCancelMsg3)
+				if err != nil {
+					return err
+				}
+				err = quickfix.Send(orderMassCancelMsg2)
+				if err != nil {
+					return err
+				}
+				err = quickfix.Send(orderCancelMsg4)
+				if err != nil {
+					return err
+				}
+				continue LOOP
+			}
+
 			// Prepare order
 			orderUpdateMsg, err := buildCancelReplaceMessage(*session, lastExecutionReport)
 			if err != nil {
@@ -437,6 +492,82 @@ func buildCancelReplaceMessage(session config.Session, executionReport *quickfix
 	utils.QuickFixMessagePartSetString(&message.Header, session.SenderSubID, field.NewSenderSubID)
 
 	return message, nil
+}
+
+func buildCancelMessage(session config.Session, executionReport *quickfix.Message) (quickfix.Messagable, error) {
+	eside, err := dict.OrderSideStringToEnum(optionOrderSide)
+	if err != nil {
+		return nil, err
+	}
+
+	switch session.BeginString {
+	case quickfix.BeginStringFIXT11:
+		switch session.DefaultApplVerID {
+		case "FIX.5.0SP2":
+			message := quickfix.NewMessage()
+			header := fixt11.NewHeader(&message.Header)
+			header.Set(field.NewMsgType(enum.MsgType_ORDER_CANCEL_REQUEST))
+			message.Body.Set(field.NewClOrdID(uuid.NewString()))
+			message.Body.Set(field.NewSide(eside))
+			message.Body.Set(field.NewTransactTime(time.Now()))
+			oldClOrdId := field.ClOrdIDField{}
+			if err := executionReport.Body.GetField(tag.ClOrdID, &oldClOrdId); err != nil {
+				return nil, err
+			}
+			message.Body.Set(field.NewOrigClOrdID(oldClOrdId.String()))
+			if len(optionOrderSymbol) > 0 {
+				message.Body.Set(field.NewSymbol(optionOrderSymbol))
+			}
+			partyIdOptions.EnrichMessageBody(&message.Body, session)
+			utils.QuickFixMessagePartSetString(&message.Header, session.TargetCompID, field.NewTargetCompID)
+			utils.QuickFixMessagePartSetString(&message.Header, session.TargetSubID, field.NewTargetSubID)
+			utils.QuickFixMessagePartSetString(&message.Header, session.SenderCompID, field.NewSenderCompID)
+			utils.QuickFixMessagePartSetString(&message.Header, session.SenderSubID, field.NewSenderSubID)
+
+			return message, nil
+
+		default:
+			return nil, errors.FixVersionNotImplemented
+		}
+
+	default:
+		return nil, errors.FixVersionNotImplemented
+	}
+}
+
+func buildMassCancelMessage(session config.Session) (quickfix.Messagable, error) {
+	eside, err := dict.OrderSideStringToEnum(optionOrderSide)
+	if err != nil {
+		return nil, err
+	}
+
+	switch session.BeginString {
+	case quickfix.BeginStringFIXT11:
+		switch session.DefaultApplVerID {
+		case "FIX.5.0SP2":
+			message := quickfix.NewMessage()
+			header := fixt11.NewHeader(&message.Header)
+			header.Set(field.NewMsgType(enum.MsgType_ORDER_MASS_CANCEL_REQUEST))
+			message.Body.Set(field.NewClOrdID(uuid.NewString()))
+			message.Body.Set(field.NewMassCancelRequestType(enum.MassCancelRequestType_CANCEL_ORDERS_FOR_A_SECURITY))
+			message.Body.Set(field.NewTransactTime(time.Now()))
+			message.Body.Set(field.NewSide(eside))
+			message.Body.Set(field.NewSymbol(optionOrderSymbol))
+			partyIdOptions.EnrichMessageBody(&message.Body, session)
+			utils.QuickFixMessagePartSetString(&message.Header, session.TargetCompID, field.NewTargetCompID)
+			utils.QuickFixMessagePartSetString(&message.Header, session.TargetSubID, field.NewTargetSubID)
+			utils.QuickFixMessagePartSetString(&message.Header, session.SenderCompID, field.NewSenderCompID)
+			utils.QuickFixMessagePartSetString(&message.Header, session.SenderSubID, field.NewSenderSubID)
+
+			return message, nil
+
+		default:
+			return nil, errors.FixVersionNotImplemented
+		}
+
+	default:
+		return nil, errors.FixVersionNotImplemented
+	}
 }
 
 func processResponse(app *application.NewOrder, msg *quickfix.Message) error {
