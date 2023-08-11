@@ -11,12 +11,12 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/shopspring/decimal"
 
+	"github.com/artex-io/quickfixgo-fix50sp2/marketdataincrementalrefresh"
+	"github.com/artex-io/quickfixgo-fix50sp2/marketdatasnapshotfullrefresh"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/quickfixgo/enum"
 	"github.com/quickfixgo/quickfix"
 	"github.com/quickfixgo/tag"
-	"github.com/sylr/quickfixgo-fix50sp2/marketdataincrementalrefresh"
-	"github.com/sylr/quickfixgo-fix50sp2/marketdatasnapshotfullrefresh"
 
 	"sylr.dev/fix/pkg/dict"
 	"sylr.dev/fix/pkg/utils"
@@ -68,6 +68,24 @@ var (
 		},
 		[]string{"security", "type", "side"},
 	)
+	metricMarketDataValidatorCrossedUpdates = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "fix",
+			Subsystem: "marketdata_validator",
+			Name:      "crossed_updates_totals",
+			Help:      "Number of updates that resulted in a crossed book",
+		},
+		[]string{"security"},
+	)
+	metricMarketDataValidatorBookCrossed = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "fix",
+			Subsystem: "marketdata_validator",
+			Name:      "book_crossed",
+			Help:      "Book crossed for security",
+		},
+		[]string{"security"},
+	)
 )
 
 func init() {
@@ -76,19 +94,17 @@ func init() {
 	prometheus.MustRegister(metricMarketDataValidatorTradeUpdates)
 	prometheus.MustRegister(metricMarketDataValidatorErrors)
 	prometheus.MustRegister(metricMarketDataValidatorOrders)
+	prometheus.MustRegister(metricMarketDataValidatorBookCrossed)
+	prometheus.MustRegister(metricMarketDataValidatorCrossedUpdates)
 }
 
-func NewMarketDataValidator(logger *zerolog.Logger, security string) *MarketDataValidator {
+func NewMarketDataValidator(logger *zerolog.Logger, securities []string) *MarketDataValidator {
 	mdr := MarketDataValidator{
-		Connected: make(chan interface{}),
+		Connected:            make(chan interface{}),
+		SecurityListResponse: make(chan *quickfix.Message),
 		Validator: &Validator{
-			orders: Orders{
-				orders:      make([]*Order, 0),
-				typesVolume: make(map[enum.OrdType]int64),
-				sidesVolume: make(map[enum.MDEntryType]int64),
-			},
-			security: security,
-			logger:   logger,
+			secList: createSecurityList(securities),
+			logger:  logger,
 		},
 		router: quickfix.NewMessageRouter(),
 	}
@@ -97,28 +113,50 @@ func NewMarketDataValidator(logger *zerolog.Logger, security string) *MarketData
 	mdr.router.AddRoute(marketdataincrementalrefresh.Route(mdr.onMarketDataIncrementalRefresh))
 	mdr.router.AddRoute(marketdatasnapshotfullrefresh.Route(mdr.onMarketDataSnapshotFullRefresh))
 
-	// Initialize error vectors so that we we have pre-existing 0 values allowing
+	// Initialize error vectors so that we have pre-existing 0 values allowing
 	// to do operations such as delta() when first errors are reported
-	metricMarketDataValidatorErrors.WithLabelValues(security, ErrOrderNotFound.Error()).Add(0)
-	metricMarketDataValidatorErrors.WithLabelValues(security, ErrOrderAlreadyExists.Error()).Add(0)
+	for _, security := range securities {
+		metricMarketDataValidatorErrors.WithLabelValues(security, ErrOrderNotFound.Error()).Add(0)
+		metricMarketDataValidatorErrors.WithLabelValues(security, ErrOrderAlreadyExists.Error()).Add(0)
+		metricMarketDataValidatorCrossedUpdates.WithLabelValues(security).Add(0)
+	}
 
 	return &mdr
+}
+
+func createSecurityList(securities []string) map[string]*Orders {
+	secs := make(map[string]*Orders, len(securities))
+	for _, security := range securities {
+		secs[security] = &Orders{
+			orders:        make([]*Order, 0),
+			typesVolume:   make(map[enum.OrdType]int64),
+			sidesVolume:   make(map[enum.MDEntryType]int64),
+			bestBuyOrder:  &Order{},
+			bestSellOrder: &Order{},
+		}
+	}
+	return secs
 }
 
 type MarketDataValidator struct {
 	utils.QuickFixAppMessageLogger
 
-	Settings        *quickfix.Settings
-	Connected       chan interface{}
-	FromAppMessages chan quickfix.Messagable
-	stopped         bool
-	mux             sync.RWMutex
-	router          *quickfix.MessageRouter
+	Settings             *quickfix.Settings
+	Connected            chan interface{}
+	SecurityListResponse chan *quickfix.Message
+	stopped              bool
+	mux                  sync.RWMutex
+	router               *quickfix.MessageRouter
 
 	Validator *Validator
 }
 
 var _ quickfix.Application = (*MarketDataValidator)(nil)
+
+// UpdateSecurityList must be called before subscribing to market data to refresh the list of securities
+func (app *MarketDataValidator) UpdateSecurityList(securities []string) {
+	app.Validator.secList = createSecurityList(securities)
+}
 
 // Stop ensures the app chans are emptied so that quickfix can carry on with
 // the LOGOUT process correctly.
@@ -129,11 +167,6 @@ func (app *MarketDataValidator) Stop() {
 	defer app.mux.Unlock()
 
 	app.stopped = true
-
-	// Empty the channel to avoid blocking
-	for len(app.FromAppMessages) > 0 {
-		<-app.FromAppMessages
-	}
 }
 
 // Notification of a session begin created.
@@ -231,6 +264,18 @@ func (app *MarketDataValidator) FromApp(message *quickfix.Message, sessionID qui
 		app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
 		app.Connected <- struct{}{}
 		return nil
+	case string(enum.MsgType_SECURITY_LIST):
+		app.SecurityListResponse <- message
+		return nil
+	case string(enum.MsgType_NEWS):
+		if txt, err := message.Body.GetString(tag.Text); err != nil {
+			return err
+		} else if headline, err := message.Body.GetString(tag.Headline); err != nil {
+			return err
+		} else {
+			app.Logger.Info().Str("headline", headline).Str("text", txt).Msg("Receiving news")
+		}
+		return nil
 	}
 
 	app.LogMessage(zerolog.TraceLevel, message, sessionID, false)
@@ -240,6 +285,22 @@ func (app *MarketDataValidator) FromApp(message *quickfix.Message, sessionID qui
 
 func (app *MarketDataValidator) onMarketDataSnapshotFullRefresh(msg marketdatasnapshotfullrefresh.MarketDataSnapshotFullRefresh, sessionID quickfix.SessionID) quickfix.MessageRejectError {
 	app.Logger.Info().Msg("Received snapshot full refresh")
+
+	security, err := msg.GetSymbol()
+	if err != nil {
+		app.Logger.Error().Err(err).Msgf("NoSymbol")
+		return err
+	}
+
+	var orders *Orders
+	var ok bool
+
+	if orders, ok = app.Validator.secList[security]; !ok {
+		reason := fmt.Sprintf("symbol not found internally : %s", security)
+		err = quickfix.NewMessageRejectError(reason, 0, nil)
+		app.Logger.Error().Err(err).Msgf(reason)
+		return err
+	}
 
 	mdentries, err := msg.GetNoMDEntries()
 	if err != nil {
@@ -278,32 +339,57 @@ func (app *MarketDataValidator) onMarketDataSnapshotFullRefresh(msg marketdatasn
 				Side:          entryType,
 			}
 
-			if err := app.Validator.orders.AddOrder(&order); err != nil {
+			if err := orders.AddOrder(&order); err != nil {
 				app.Logger.Error().Msgf("Error while adding order (%s): %s", order.Id, err)
-				metricMarketDataValidatorErrors.WithLabelValues(app.Validator.security, err.Error()).Inc()
+				metricMarketDataValidatorErrors.WithLabelValues(security, err.Error()).Inc()
 			}
 
 		case enum.MDEntryType_TRADE:
-			metricMarketDataValidatorTradeUpdates.WithLabelValues(app.Validator.security, "new").Inc()
+			metricMarketDataValidatorTradeUpdates.WithLabelValues(security, "new").Inc()
 
 		default:
 			app.Logger.Warn().Msgf("Entry type not implemented: %s", entryType)
 		}
 	}
 
-	app.Logger.Info().Msgf("Order book: types=%+v sides=%+v", app.Validator.orders.typesVolume, app.Validator.orders.sidesVolume)
+	app.Logger.Info().Str("security", security).Any("types", orders.typesVolume).Any("sides", orders.sidesVolume).Msgf("Order book:")
+
+	if orders.isOrderBookCrossed(security) {
+		app.Logger.Error().Str("security", security).Any("Best BUY order", orders.bestBuyOrder).Any("Best SELL order", orders.bestSellOrder).Msgf("Order book is crossed")
+	}
 
 	return nil
 }
 
 func (app *MarketDataValidator) onMarketDataIncrementalRefresh(msg marketdataincrementalrefresh.MarketDataIncrementalRefresh, sessionID quickfix.SessionID) quickfix.MessageRejectError {
-	metricMarketDataValidatorIncrementalRefreshes.WithLabelValues(app.Validator.security).Inc()
-
 	mdentries, err := msg.GetNoMDEntries()
 	if err != nil {
 		app.Logger.Error().Err(err).Msgf("Received incremental refresh without NoMDEntries")
 		return err
 	}
+
+	if mdentries.Len() == 0 {
+		reason := "MDEntries seems empty"
+		app.Logger.Error().Err(err).Msgf(reason)
+		return quickfix.NewMessageRejectError(reason, 0, nil)
+	}
+
+	var security string
+	security, err = mdentries.Get(0).GetSymbol()
+	if err != nil {
+		app.Logger.Error().Err(err).Msgf("No security found in MDEntries")
+		return err
+	}
+
+	var orders *Orders
+	var ok bool
+	if orders, ok = app.Validator.secList[security]; !ok {
+		reason := fmt.Sprintf("security not found: %s", security)
+		app.Logger.Error().Err(err).Msgf(reason)
+		return quickfix.NewMessageRejectError(reason, 0, nil)
+	}
+
+	metricMarketDataValidatorIncrementalRefreshes.WithLabelValues(security).Inc()
 
 	app.Logger.Info().Msgf("Received incremental refresh with %d entries", mdentries.Len())
 
@@ -329,12 +415,19 @@ func (app *MarketDataValidator) onMarketDataIncrementalRefresh(msg marketdatainc
 				continue
 			}
 
+			px, err := mdentry.GetMDEntryPx()
+			if err != nil {
+				app.Logger.Error().Msgf("No px found: %v", mdentry.FieldMap)
+				continue
+			}
+
 			order := Order{
 				Id:            orderID,
 				Size:          utils.MustNot(mdentry.GetMDEntrySize()),
 				RemainingSize: utils.MustNot(mdentry.GetMDEntrySize()),
 				Type:          orderType,
 				Side:          entryType,
+				Price:         px,
 			}
 
 			updateAction, err := mdentry.GetMDUpdateAction()
@@ -348,27 +441,30 @@ func (app *MarketDataValidator) onMarketDataIncrementalRefresh(msg marketdatainc
 
 			switch updateAction {
 			case enum.MDUpdateAction_NEW:
-				metricMarketDataValidatorOrderUpdates.WithLabelValues(app.Validator.security, "new", typeStr, sideStr).Inc()
+				metricMarketDataValidatorOrderUpdates.WithLabelValues(security, "new", typeStr, sideStr).Inc()
 
-				if err := app.Validator.orders.AddOrder(&order); err != nil {
+				if err := orders.AddOrder(&order); err != nil {
 					app.Logger.Error().Msgf("Error while adding order (%s): %s", order.Id, err)
-					metricMarketDataValidatorErrors.WithLabelValues(app.Validator.security, err.Error()).Inc()
+					metricMarketDataValidatorErrors.WithLabelValues(security, err.Error()).Inc()
 				}
+
 			case enum.MDUpdateAction_CHANGE:
-				metricMarketDataValidatorOrderUpdates.WithLabelValues(app.Validator.security, "change", typeStr, sideStr).Inc()
+				metricMarketDataValidatorOrderUpdates.WithLabelValues(security, "change", typeStr, sideStr).Inc()
 
-				if err := app.Validator.orders.UpdateOrder(&order); err != nil {
+				if err := orders.UpdateOrder(&order); err != nil {
 					app.Logger.Error().Msgf("Error while updating order (%s): %s", order.Id, err)
-					metricMarketDataValidatorErrors.WithLabelValues(app.Validator.security, err.Error()).Inc()
+					metricMarketDataValidatorErrors.WithLabelValues(security, err.Error()).Inc()
 				}
-			case enum.MDUpdateAction_DELETE:
-				metricMarketDataValidatorOrderUpdates.WithLabelValues(app.Validator.security, "delete", typeStr, sideStr).Inc()
 
-				if err := app.Validator.orders.DeleteOrder(&order); err != nil {
+			case enum.MDUpdateAction_DELETE:
+				metricMarketDataValidatorOrderUpdates.WithLabelValues(security, "delete", typeStr, sideStr).Inc()
+
+				if err := orders.DeleteOrder(&order); err != nil {
 					app.Logger.Error().Msgf("Error while deleting order (%s): %s", order.Id, err)
-					metricMarketDataValidatorErrors.WithLabelValues(app.Validator.security, err.Error()).Inc()
+					metricMarketDataValidatorErrors.WithLabelValues(security, err.Error()).Inc()
 				}
 			}
+
 		case enum.MDEntryType_TRADE:
 			updateAction, err := mdentry.GetMDUpdateAction()
 			if err != nil {
@@ -378,23 +474,26 @@ func (app *MarketDataValidator) onMarketDataIncrementalRefresh(msg marketdatainc
 
 			switch updateAction {
 			case enum.MDUpdateAction_NEW:
-				metricMarketDataValidatorTradeUpdates.WithLabelValues(app.Validator.security, "new").Inc()
+				metricMarketDataValidatorTradeUpdates.WithLabelValues(security, "new").Inc()
 			}
 
 		default:
 			app.Logger.Warn().Msgf("Entry type not implemented: %s", entryType)
 		}
 	}
+	app.Logger.Info().Str("security", security).Any("types", orders.typesVolume).Any("sides", orders.sidesVolume).Msg("Order book")
 
-	app.Logger.Info().Msgf("Order book: types=%#v sides=%#v", app.Validator.orders.typesVolume, app.Validator.orders.sidesVolume)
-
-	stats := app.Validator.orders.Stats()
+	stats := orders.Stats()
 	for ty, sides := range stats {
 		tyStr := strings.ToLower(dict.OrderTypesReversed[ty])
 		for si, count := range sides {
 			siStr := strings.ToLower(dict.MDEntryTypesReversed[si])
-			metricMarketDataValidatorOrders.WithLabelValues(app.Validator.security, tyStr, siStr).Set(float64(count))
+			metricMarketDataValidatorOrders.WithLabelValues(security, tyStr, siStr).Set(float64(count))
 		}
+	}
+
+	if orders.isOrderBookCrossed(security) {
+		app.Logger.Error().Str("security", security).Any("Best BUY order", orders.bestBuyOrder).Any("Best SELL order", orders.bestSellOrder).Msgf("Order book is crossed")
 	}
 
 	return nil
@@ -411,13 +510,17 @@ type Order struct {
 	RemainingSize decimal.Decimal
 	Type          enum.OrdType
 	Side          enum.MDEntryType
+	Price         decimal.Decimal
 }
 
 type Orders struct {
-	orders      []*Order
-	typesVolume map[enum.OrdType]int64
-	sidesVolume map[enum.MDEntryType]int64
-	mux         sync.RWMutex
+	orders        []*Order
+	typesVolume   map[enum.OrdType]int64
+	sidesVolume   map[enum.MDEntryType]int64
+	mux           sync.RWMutex
+	bestBuyOrder  *Order
+	bestSellOrder *Order
+	isCrossed     bool
 }
 
 func (o *Orders) Stats() map[enum.OrdType]map[enum.MDEntryType]int64 {
@@ -485,6 +588,8 @@ func (o *Orders) AddOrder(order *Order) error {
 		o.sidesVolume[order.Side] = 1
 	}
 
+	o.fillBestOrder(order)
+
 	return nil
 }
 
@@ -511,6 +616,8 @@ func (o *Orders) DeleteOrder(order *Order) error {
 		return fmt.Errorf("something wrong happened")
 	}
 
+	o.updateBestPrice(order, enum.MDUpdateAction_DELETE)
+
 	return nil
 }
 
@@ -525,6 +632,8 @@ func (o *Orders) UpdateOrder(order *Order) error {
 
 	o.orders[i] = order
 
+	o.updateBestPrice(order, enum.MDUpdateAction_CHANGE)
+
 	return nil
 }
 
@@ -535,7 +644,85 @@ type Trade struct {
 }
 
 type Validator struct {
-	security string
-	orders   Orders
-	logger   *zerolog.Logger
+	secList map[string]*Orders
+	logger  *zerolog.Logger
+}
+
+func (o *Orders) fillBestOrder(order *Order) {
+	if order.Side == enum.MDEntryType_BID {
+		if o.bestBuyOrder == nil || order.Price.GreaterThan(o.bestBuyOrder.Price) {
+			o.bestBuyOrder = order
+		}
+	} else {
+		if o.bestSellOrder == nil || order.Price.LessThan(o.bestSellOrder.Price) {
+			o.bestSellOrder = order
+		}
+	}
+}
+
+func (o *Orders) updateBestPrice(order *Order, action enum.MDUpdateAction) {
+	if (order.Side == enum.MDEntryType_BID && o.bestBuyOrder == nil) || (order.Side == enum.MDEntryType_OFFER && o.bestSellOrder == nil) {
+		goto UPDATE_BEST_ORDER
+	}
+
+	if action == enum.MDUpdateAction_CHANGE {
+		o.fillBestOrder(order)
+		return
+	}
+
+	if action == enum.MDUpdateAction_DELETE {
+		if order.Side == enum.MDEntryType_BID && order.Id == o.bestBuyOrder.Id {
+			o.bestBuyOrder = &Order{}
+		} else if order.Side == enum.MDEntryType_OFFER && order.Id == o.bestSellOrder.Id {
+			o.bestSellOrder = &Order{}
+		} else {
+			return
+		}
+	}
+
+UPDATE_BEST_ORDER:
+	clo := o.getOrdersBySide(order.Side)
+
+	for _, co := range clo {
+		o.fillBestOrder(co)
+	}
+}
+
+func (o *Orders) getOrdersBySide(side enum.MDEntryType) []*Order {
+	var lo []*Order
+
+	for _, o := range o.orders {
+		if o.Side != side {
+			continue
+		}
+		lo = append(lo, o)
+	}
+
+	return lo
+}
+
+func (o *Orders) isOrderBookCrossed(security string) bool {
+	o.mux.Lock()
+	defer o.mux.Unlock()
+
+	if o.bestBuyOrder != nil &&
+		!o.bestBuyOrder.Price.IsZero() &&
+		o.bestSellOrder != nil &&
+		!o.bestSellOrder.Price.IsZero() &&
+		o.bestBuyOrder.Price.GreaterThanOrEqual(o.bestSellOrder.Price) {
+		// Book is crossed
+		if !o.isCrossed {
+			metricMarketDataValidatorCrossedUpdates.WithLabelValues(security).Add(1)
+			metricMarketDataValidatorBookCrossed.WithLabelValues(security).Set(1)
+			o.isCrossed = true
+		}
+		return true
+	}
+
+	if o.isCrossed {
+		metricMarketDataValidatorBookCrossed.WithLabelValues(security).Set(0)
+		o.isCrossed = false
+	}
+
+	return false
 }
