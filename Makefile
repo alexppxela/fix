@@ -1,15 +1,27 @@
+PROJECT_NAME      ?= fix
 GO                ?= $(shell which go)
+GH                ?= $(shell which gh)
 GIT_UPDATE_INDEX  := $(shell git update-index --refresh > /dev/null 2>&1)
 GIT_REVISION      ?= $(shell git rev-parse HEAD)
 GIT_VERSION       ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
+export GOPRIVATE=github.com/artex-io
+
 GOENV_GOOS               := $(shell $(GO) env GOOS)
 GOENV_GOARCH             := $(shell $(GO) env GOARCH)
 GOENV_GOARM              := $(shell $(GO) env GOARM)
+GOENV_GOPRIVATE          := $(shell go env GOPRIVATE)
 CGO_ENABLED              ?= 1
 GOOS                     ?= $(GOENV_GOOS)
 GOARCH                   ?= $(GOENV_GOARCH)
 GOARM                    ?= $(GOENV_GOARM)
+GOPRIVATE                ?= $(GOENV_GOPRIVATE)
+
+ifneq ($(GH),)
+GH_GIT_CREDS             := $(shell echo url=https://github.com/artex-io/$(PROJECT_NAME) | gh auth git-credential get)
+endif # $(GH)
+GOPRIVATE_GITHUB_USER    ?= $(subst username=,,$(filter username=%,$(GH_GIT_CREDS)))
+GOPRIVATE_GITHUB_TOKEN   ?= $(subst password=,,$(filter password=%,$(GH_GIT_CREDS)))
 GO_BUILD_SRC             := $(shell find . -name \*.go -type f) go.mod go.sum cmd/init/config/templates/*
 GO_BUILD_EXTLDFLAGS      ?=
 GO_BUILD_TAGS            ?=
@@ -18,15 +30,15 @@ GO_BUILD_FLAGS           := -trimpath
 GO_BUILD_LDFLAGS_OPTIMS  ?= -s -w
 
 ifeq ($(GOOS)/$(GOARCH),$(GOENV_GOOS)/$(GOENV_GOARCH))
-GO_BUILD_TARGET          ?= dist/fix
-GO_BUILD_VERSION_TARGET  ?= dist/fix-$(GIT_VERSION)
+GO_BUILD_TARGET          ?= dist/$(PROJECT_NAME)
+GO_BUILD_VERSION_TARGET  ?= dist/$(PROJECT_NAME)-$(GIT_VERSION)
 else
 ifeq ($(GOARCH),arm)
-GO_BUILD_TARGET          ?= dist/fix-$(GOOS)-$(GOARCH)v$(GOARM)
-GO_BUILD_VERSION_TARGET  := dist/fix-$(GIT_VERSION)-$(GOOS)-$(GOARCH)v$(GOARM)
+GO_BUILD_TARGET          ?= dist/$(PROJECT_NAME)-$(GOOS)-$(GOARCH)v$(GOARM)
+GO_BUILD_VERSION_TARGET  := dist/$(PROJECT_NAME)-$(GIT_VERSION)-$(GOOS)-$(GOARCH)v$(GOARM)
 else
-GO_BUILD_TARGET          ?= dist/fix-$(GOOS)-$(GOARCH)
-GO_BUILD_VERSION_TARGET  := dist/fix-$(GIT_VERSION)-$(GOOS)-$(GOARCH)
+GO_BUILD_TARGET          ?= dist/$(PROJECT_NAME)-$(GOOS)-$(GOARCH)
+GO_BUILD_VERSION_TARGET  := dist/$(PROJECT_NAME)-$(GIT_VERSION)-$(GOOS)-$(GOARCH)
 endif # ($(GOARCH),arm)
 endif # ($(GOOS)/$(GOARCH),$(GOENV_GOOS)/$(GOENV_GOARCH))
 
@@ -64,13 +76,13 @@ GO_BUILD_LDFLAGS        := -ldflags '$(GO_BUILD_LDFLAGS_OPTIMS) -X sylr.dev/fix/
 
 GO_TOOLS_GOLANGCI_LINT ?= $(shell $(GO) env GOPATH)/bin/golangci-lint
 
-DOCKER_BUILD_IMAGE      ?= ghcr.io/sylr/fix
+DOCKER_BUILD_IMAGE      ?= ghcr.io/artex-io/fix
 DOCKER_BUILD_VERSION    ?= $(GIT_VERSION)
 DOCKER_BUILD_GO_VERSION ?= 1.20
 DOCKER_BUILD_LABELS      = --label org.opencontainers.image.title=fix
 DOCKER_BUILD_LABELS     += --label org.opencontainers.image.description="fix client"
-DOCKER_BUILD_LABELS     += --label org.opencontainers.image.url="https://github.com/sylr/fix"
-DOCKER_BUILD_LABELS     += --label org.opencontainers.image.source="https://github.com/sylr/fix"
+DOCKER_BUILD_LABELS     += --label org.opencontainers.image.url="https://github.com/artex-io/fix"
+DOCKER_BUILD_LABELS     += --label org.opencontainers.image.source="https://github.com/artex-io/fix"
 DOCKER_BUILD_LABELS     += --label org.opencontainers.image.revision=$(GIT_REVISION)
 DOCKER_BUILD_LABELS     += --label org.opencontainers.image.version=$(GIT_VERSION)
 DOCKER_BUILD_LABELS     += --label org.opencontainers.image.created=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
@@ -81,6 +93,22 @@ DOCKER_BUILD_BUILD_ARGS += --build-arg=GO_BUILD_EXTLDFLAGS=-static
 DOCKER_BUILD_BUILD_ARGS += --build-arg=GO_BUILD_LDFLAGS_OPTIMS="-linkmode external"
 DOCKER_BUILDX_PLATFORMS ?= linux/amd64,linux/arm64
 DOCKER_BUILDX_CACHE     ?= /tmp/.buildx-cache
+
+ifeq ($(CI),true)
+DOCKER_BUILD_BUILD_ARGS += --cache-to=type=registry,mode=max,ref=$(DOCKER_BUILD_IMAGE)-build-cache
+DOCKER_BUILD_BUILD_ARGS += --cache-from=type=registry,ref=$(DOCKER_BUILD_IMAGE)-build-cache
+DOCKER_BUILD_BUILD_ARGS += --progress=plain
+DOCKER_BUILD_BUILD_ARGS += --build-arg=GOPRIVATE=$(GOPRIVATE)
+DOCKER_BUILD_BUILD_ARGS += --build-arg=GOPRIVATE_GITHUB_USER=$(GOPRIVATE_GITHUB_USER)
+DOCKER_BUILD_BUILD_ARGS += --build-arg=GOPRIVATE_GITHUB_TOKEN=$(GOPRIVATE_GITHUB_TOKEN)
+else
+DOCKER_BUILDX_CACHE_DIR ?= /tmp/.buildx-cache
+DOCKER_BUILD_BUILD_ARGS += --cache-to=type=local,dest=$(DOCKER_BUILDX_CACHE_DIR)
+DOCKER_BUILD_BUILD_ARGS += --cache-from=type=local,src=$(DOCKER_BUILDX_CACHE_DIR)
+DOCKER_BUILD_BUILD_ARGS += --build-arg=GOPRIVATE=$(GOPRIVATE)
+DOCKER_BUILD_BUILD_ARGS += --build-arg=GOPRIVATE_GITHUB_USER=$(GOPRIVATE_GITHUB_USER)
+DOCKER_BUILD_BUILD_ARGS += --build-arg=GOPRIVATE_GITHUB_TOKEN=$(GOPRIVATE_GITHUB_TOKEN)
+endif
 
 # ------------------------------------------------------------------------------
 
@@ -146,7 +174,7 @@ $(GO_CROSSBUILD_WINDOWS_ARM64_TARGET): $(GO_BUILD_SRC) $(GO_BUILD_FLAGS_TARGET)
 crossbuild-checksums: dist/checksums
 
 dist/checksums : $(GO_CROSSBUILD_TARGETS)
-	cd dist && shasum -a 256 fix-*-* > checksums
+	cd dist && shasum -a 256 $(PROJECT_NAME)-*-* > checksums
 
 # -- go mod --------------------------------------------------------------------
 
@@ -184,7 +212,6 @@ $(GO_TOOLS_GOLANGCI_LINT):
 docker-build:
 	docker buildx build . -f Dockerfile \
 		-t $(DOCKER_BUILD_IMAGE):$(DOCKER_BUILD_VERSION) \
-		--cache-to=type=local,dest=$(DOCKER_BUILDX_CACHE) \
 		--platform=$(DOCKER_BUILDX_PLATFORMS) \
 		$(DOCKER_BUILD_BUILD_ARGS) \
 		$(DOCKER_BUILD_LABELS) \
@@ -193,7 +220,6 @@ docker-build:
 docker-push:
 	@docker buildx build . -f Dockerfile \
 		-t $(DOCKER_BUILD_IMAGE):$(DOCKER_BUILD_VERSION) \
-		--cache-from=type=local,src=$(DOCKER_BUILDX_CACHE) \
 		--platform=$(DOCKER_BUILDX_PLATFORMS) \
 		$(DOCKER_BUILD_BUILD_ARGS) \
 		$(DOCKER_BUILD_LABELS) \
@@ -201,3 +227,16 @@ docker-push:
 
 docker-inspect:
 	@docker buildx imagetools inspect $(DOCKER_BUILD_IMAGE):$(DOCKER_BUILD_VERSION)
+
+docker-version:
+	@echo $(DOCKER_BUILD_VERSION)
+
+docker-image-exists:
+	docker manifest inspect $(DOCKER_BUILD_IMAGE):$(DOCKER_BUILD_VERSION) > /dev/null
+
+# -- helm  ---------------------------------------------------------------------
+
+.PHONY: helm-chart-test
+
+helm-chart-test:
+	@contribs/helm-chart-test
