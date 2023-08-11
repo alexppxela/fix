@@ -6,7 +6,19 @@ FROM --platform=$TARGETPLATFORM golang:$GO_VERSION AS go
 
 RUN apt-get update && apt-get dist-upgrade -y && apt-get install -y build-essential git
 
+ARG GOPRIVATE="github.com/artex-io/*,gitlab.com/modulus.io/*"
+ARG GOPRIVATE_GITHUB_USER=""
+ARG GOPRIVATE_GITHUB_TOKEN=""
+
 WORKDIR $GOPATH/src/sylr.dev/fix
+
+RUN if [ -n "${GOPRIVATE_GITHUB_TOKEN}" ]; then \
+        if [ -n "${GOPRIVATE_GITHUB_USER}" ]; then \
+            git config --global "url.https://${GOPRIVATE_GITHUB_USER}:${GOPRIVATE_GITHUB_TOKEN}@github.com/.insteadOf" "https://github.com/"; \
+        else \
+            git config --global "url.https://${GOPRIVATE_GITHUB_TOKEN}@github.com/.insteadOf" "https://github.com/"; \
+        fi; \
+    fi;
 
 COPY go.mod go.sum ./
 
@@ -35,13 +47,19 @@ SHELL ["bash", "-c"]
 RUN make build \
     GIT_REVISION=${GIT_REVISION} \
     GIT_VERSION=${GIT_VERSION} \
+    GIT_UPDATE_INDEX=${GIT_UPDATE_INDEX} \
+    GOPRIVATE_GITHUB_USER=${GOPRIVATE_GITHUB_USER} \
+    GOPRIVATE_GITHUB_TOKEN=${GOPRIVATE_GITHUB_TOKEN} \
+    GO_BUILD_TAGS="${GO_BUILD_TAGS}" \
+    GO_BUILD_FLAGS="${GO_BUILD_FLAGS}" \
     GO_BUILD_EXTLDFLAGS="${GO_BUILD_EXTLDFLAGS}" \
     GO_BUILD_LDFLAGS_OPTIMS="${GO_BUILD_LDFLAGS_OPTIMS}" \
     GO_BUILD_TARGET=dist/${TARGETPLATFORM}/fix \
     GO_BUILD_TAGS=${GO_BUILD_TAGS} \
     GOOS=${TARGETOS} \
     GOARCH=${TARGETARCH} \
-    GOARM=${TARGETVARIANT/v/}
+    GOARM=${TARGETVARIANT/v/} \
+    GO_BUILD_TARGET=dist/${TARGETPLATFORM}/fix
 
 RUN useradd fix --create-home
 
