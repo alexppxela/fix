@@ -4,6 +4,8 @@ filippo.io/edwards25519 v1.0.0 h1:0wAIcmJUqRdI8IJ/3eGi5/HwXZWPujYXXlkrQogz0Ek=
 filippo.io/edwards25519 v1.0.0/go.mod h1:N1IkdkCkiLB6tki+MYJoSx2JTY9NUlxZE7eHn5EwJns=
 github.com/armon/go-proxyproto v0.0.0-20210323213023-7e956b284f0a h1:AP/vsCIvJZ129pdm9Ek7bH7yutN3hByqsMoNrWAxRQc=
 github.com/armon/go-proxyproto v0.0.0-20210323213023-7e956b284f0a/go.mod h1:QmP9hvJ91BbJmGVGSbutW19IC0Q9phDCLGaomwTJbgU=
+github.com/artex-io/quickfix-go v0.6.1-0.20230808141925-433a4c32211f h1:XgFCX4/5/BuOdrvXWeO0Mz/sJ0oSun1rdYPRWj4PEUU=
+github.com/artex-io/quickfix-go v0.6.1-0.20230808141925-433a4c32211f/go.mod h1:EpJW8VCM147RilbjKHVwIPl2b7XRRiF2lYZa6yXLIV0=
 github.com/artex-io/quickfixgo-enum v0.0.0-20230808145624-9890aaad90be h1:hGdd528X694bNvvn1QDWZsr3ZjZkGa6UREF4nsKfbaw=
 github.com/artex-io/quickfixgo-enum v0.0.0-20230808145624-9890aaad90be/go.mod h1:z3G743D3iJFhOHUk0bo3O/O15Wknl4hy+y515r/aK4c=
 github.com/artex-io/quickfixgo-field v0.0.0-20230808145912-11a2ffdb0b8f h1:1VO6/b5XyXPDwe9Iq7/Lg6ftlK8AaQ4qhkl7qe8UfwM=
@@ -100,8 +102,6 @@ github.com/prometheus/procfs v0.11.1 h1:xRC8Iq1yyca5ypa9n1EZnWZkt7dwcoRPQwX/5gwa
 github.com/prometheus/procfs v0.11.1/go.mod h1:eesXgaPo1q7lBpVMoMy0ZOFTth9hBn4W/y0/p/ScXhY=
 github.com/quickfixgo/fixt11 v0.1.0 h1:7pPnTNPa5wESbQVezLK6ExbSaqcJS2oruMUgnNNH8ZM=
 github.com/quickfixgo/fixt11 v0.1.0/go.mod h1:JV9yBYvw7dx6hQZeI3rV7eJ6c3SUf5bXwSU3Eb09ok0=
-github.com/quickfixgo/quickfix v0.7.0 h1:UXfJsJi7j11ejyXdQAKaWJxCaiA2SXVWJbV6v2wfdnQ=
-github.com/quickfixgo/quickfix v0.7.0/go.mod h1:BpPAkUEp6Xt6Y1akRZExzt0uP3jJMKAuDkagUBkgTyI=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=
 github.com/rivo/uniseg v0.4.4 h1:8TfxU8dW6PdqD27gjM8MVNuicgxIjxpm4K7x4jp8sis=
 github.com/rivo/uniseg v0.4.4/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=

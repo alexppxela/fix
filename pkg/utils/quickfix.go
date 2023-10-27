@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/go-set"
 	"github.com/olekukonko/tablewriter"
 	"github.com/quickfixgo/enum"
+	"github.com/quickfixgo/tag"
 	"github.com/rs/zerolog"
 	"github.com/shopspring/decimal"
 	"sylr.dev/fix/pkg/dict"
@@ -37,6 +38,76 @@ func QuickFixMessagePartSetDecimal[T quickfix.FieldWriter, T2 ~string](setter Qu
 	if len(value) > 0 {
 		setter.Set(f(MustNot(decimal.NewFromString(string(value))), scale))
 	}
+}
+
+type FieldDescription struct {
+	Field    quickfix.FieldValue
+	Tag      quickfix.Tag
+	Required bool
+}
+
+func QuickFixMessageCopyFields(outBody *quickfix.Body, inBody quickfix.Body, fieldDescriptions []FieldDescription) quickfix.MessageRejectError {
+	for _, f := range fieldDescriptions {
+		if err := inBody.GetField(f.Tag, f.Field); err != nil {
+			if f.Required {
+				return err
+			}
+		}
+		outBody.SetField(f.Tag, f.Field)
+	}
+	return nil
+}
+
+func QuickFixMessageCopyPartyIds(outBody *quickfix.Body, inBody quickfix.Body) quickfix.MessageRejectError {
+	inParties := quickfix.NewRepeatingGroup(
+		tag.NoPartyIDs,
+		quickfix.GroupTemplate{
+			quickfix.GroupElement(tag.PartyID),
+			quickfix.GroupElement(tag.PartyIDSource),
+			quickfix.GroupElement(tag.PartyRole),
+			quickfix.GroupElement(tag.PartyRoleQualifier),
+		},
+	)
+	if err := inBody.GetGroup(inParties); err != nil {
+		return err
+	}
+	if inParties.Len() == 0 {
+		return nil
+	}
+
+	outParties := quickfix.NewRepeatingGroup(
+		tag.NoPartyIDs,
+		quickfix.GroupTemplate{
+			quickfix.GroupElement(tag.PartyID),
+			quickfix.GroupElement(tag.PartyIDSource),
+			quickfix.GroupElement(tag.PartyRole),
+			quickfix.GroupElement(tag.PartyRoleQualifier),
+		},
+	)
+
+	for i := 0; i < inParties.Len(); i++ {
+		group := inParties.Get(i)
+		party := outParties.Add()
+
+		var fixString quickfix.FIXString
+		if err := group.GetField(tag.PartyID, &fixString); err != nil {
+			return err
+		}
+		party.SetField(tag.PartyID, fixString)
+		if err := group.GetField(tag.PartyIDSource, &fixString); err == nil {
+			party.SetField(tag.PartyIDSource, fixString)
+		}
+		var fixInt quickfix.FIXInt
+		if err := group.GetField(tag.PartyRole, &fixInt); err != nil {
+			return err
+		}
+		party.SetField(tag.PartyRole, fixInt)
+		if err := group.GetField(tag.PartyRoleQualifier, &fixInt); err == nil {
+			party.SetField(tag.PartyRoleQualifier, fixInt)
+		}
+	}
+	outBody.SetGroup(outParties)
+	return nil
 }
 
 type QuickFixAppMessageLogger struct {

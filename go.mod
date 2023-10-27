@@ -34,6 +34,7 @@ require (
 replace (
 	github.com/quickfixgo/enum => github.com/artex-io/quickfixgo-enum v0.0.0-20230808145624-9890aaad90be
 	github.com/quickfixgo/field => github.com/artex-io/quickfixgo-field v0.0.0-20230808145912-11a2ffdb0b8f
+	github.com/quickfixgo/quickfix => github.com/artex-io/quickfix-go v0.6.1-0.20230808141925-433a4c32211f
 	github.com/quickfixgo/tag => github.com/artex-io/quickfixgo-tag v0.0.0-20230808150418-f063b6a05d9a
 )
 
