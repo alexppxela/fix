@@ -184,6 +184,7 @@ func (o PartyIdOptions) EnrichMessageBody(messageBody *quickfix.Body, session co
 	if o.copyPartyIDFromConfig {
 		party := parties.Add()
 		party.Set(field.NewPartyID(session.Username))
+		party.Set(field.NewPartyIDSource(enum.PartyIDSource_PROPRIETARY))
 		party.Set(field.NewPartyRole(enum.PartyRole_CUSTOMER_ACCOUNT))
 	}
 
