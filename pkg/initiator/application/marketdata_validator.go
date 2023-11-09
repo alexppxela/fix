@@ -286,6 +286,7 @@ func (app *MarketDataValidator) onMarketDataSnapshotFullRefresh(msg marketdatasn
 		app.Logger.Error().Err(err).Msgf("NoMDEntries")
 		return err
 	}
+	app.Logger.Info().Int("nb-entries", mdentries.Len()).Str("sec", security).Msg("Received snapshot")
 
 	for i := 0; i < mdentries.Len(); i++ {
 		mdentry := mdentries.Get(i)

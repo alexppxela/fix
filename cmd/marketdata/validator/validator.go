@@ -28,7 +28,8 @@ import (
 )
 
 var (
-	optionSymbol []string
+	optionSymbol       []string
+	optionTradeHistory bool
 )
 
 var MarketDataValidatorCmd = &cobra.Command{
@@ -43,6 +44,7 @@ var MarketDataValidatorCmd = &cobra.Command{
 
 func init() {
 	MarketDataValidatorCmd.Flags().StringSliceVar(&optionSymbol, "symbol", []string{}, "Symbol")
+	MarketDataValidatorCmd.Flags().BoolVar(&optionTradeHistory, "trade-history", false, "Subscribe to trade history")
 
 	MarketDataValidatorCmd.RegisterFlagCompletionFunc("symbol", cobra.NoFileCompletions)
 }
@@ -203,7 +205,9 @@ func buildMessage(session config.Session) (quickfix.Messagable, error) {
 	entryTypes.Add().Set(field.NewMDEntryType(enum.MDEntryType_BID))
 	entryTypes.Add().Set(field.NewMDEntryType(enum.MDEntryType_OFFER))
 	entryTypes.Add().Set(field.NewMDEntryType(enum.MDEntryType_TRADE))
-	entryTypes.Add().Set(field.NewMDEntryType(enum.MDEntryType("101"))) // Trade History
+	if optionTradeHistory {
+		entryTypes.Add().Set(field.NewMDEntryType(enum.MDEntryType("101")))
+	}
 
 	message.Body.SetGroup(entryTypes)
 
