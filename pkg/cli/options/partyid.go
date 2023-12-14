@@ -19,13 +19,14 @@ import (
 )
 
 type PartyIdOptions struct {
-	partyIDs              []string
-	partyIDSources        []string
-	partySubIDs           []string
-	partySubIDTypes       []string
-	partyRoles            []string
-	partyRoleQualifiers   []string
-	copyPartyIDFromConfig bool
+	partyIDs                        []string
+	partyIDSources                  []string
+	partySubIDs                     []string
+	partySubIDTypes                 []string
+	partyRoles                      []string
+	partyRoleQualifiers             []string
+	copyPartyIDFromConfig           bool
+	traderAsInvestmentDecisionMaker bool
 }
 
 func NewPartyIdOptions(command *cobra.Command) *PartyIdOptions {
@@ -38,6 +39,7 @@ func NewPartyIdOptions(command *cobra.Command) *PartyIdOptions {
 	command.Flags().StringSliceVar(&opt.partySubIDs, "party-sub-ids", []string{}, "Order party sub ids (space separated)")
 	command.Flags().StringSliceVar(&opt.partySubIDTypes, "party-sub-id-types", []string{}, "Order party sub id types (space separated)")
 	command.Flags().BoolVar(&opt.copyPartyIDFromConfig, "copy-credentials-fom-config", false, "Copy credentials from config in party id fields")
+	command.Flags().BoolVar(&opt.traderAsInvestmentDecisionMaker, "trader-as-investor", false, "Use trader party id as investment decision maker")
 
 	command.RegisterFlagCompletionFunc("party-id", cobra.NoFileCompletions)
 	command.RegisterFlagCompletionFunc("party-id-source", complete.OrderPartyIDSource)
@@ -186,6 +188,13 @@ func (o PartyIdOptions) EnrichMessageBody(messageBody *quickfix.Body, session co
 		party.Set(field.NewPartyID(session.Username))
 		party.Set(field.NewPartyIDSource(enum.PartyIDSource_PROPRIETARY))
 		party.Set(field.NewPartyRole(enum.PartyRole_CUSTOMER_ACCOUNT))
+	}
+
+	if o.traderAsInvestmentDecisionMaker {
+		party := parties.Add()
+		party.Set(field.NewPartyID(session.Username))
+		party.Set(field.NewPartyIDSource(enum.PartyIDSource_PROPRIETARY))
+		party.Set(field.NewPartyRole(enum.PartyRole_INVESTMENT_DECISION_MAKER))
 	}
 
 	messageBody.SetGroup(parties)
