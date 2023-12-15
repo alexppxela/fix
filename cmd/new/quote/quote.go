@@ -33,6 +33,7 @@ var (
 	optionBuyQuantities, optionSellQuantities []int64
 	optionBuyPrices, optionSellPrices         []float64
 	optionAutoPriceUpdate                     bool
+	optionNbPriceUpdates                      int
 	optionOrderOrigination                    string
 	partyIdOptions                            *options.PartyIdOptions
 	optionExecReports                         int
@@ -63,7 +64,8 @@ func init() {
 	NewQuoteCmd.Flags().Int64SliceVar(&optionSellQuantities, "sell-quantities", []int64{}, "Quote sell quantities")
 	NewQuoteCmd.Flags().Float64SliceVar(&optionBuyPrices, "buy-prices", []float64{}, "Quote buy prices")
 	NewQuoteCmd.Flags().Float64SliceVar(&optionSellPrices, "sell-prices", []float64{}, "Quote sell prices")
-	NewQuoteCmd.Flags().BoolVar(&optionAutoPriceUpdate, "auto-price-update", false, "Generate price oscilation to send an infinity of quote updates")
+	NewQuoteCmd.Flags().BoolVar(&optionAutoPriceUpdate, "auto-price-update", false, "Generate price oscillation to send an infinity of quote updates")
+	NewQuoteCmd.Flags().IntVar(&optionNbPriceUpdates, "nb-price-updates", -1, "Number of quote updates")
 	NewQuoteCmd.Flags().StringVar(&optionOrderOrigination, "origination", "", "Order origination")
 
 	partyIdOptions = options.NewPartyIdOptions(NewQuoteCmd)
@@ -238,6 +240,11 @@ LOOP:
 					}
 				}
 				continue LOOP
+			}
+
+			if optionNbPriceUpdates > 0 && priceIteration >= optionNbPriceUpdates {
+				logger.Info().Msgf("Number of updates reached: %d", priceIteration)
+				break LOOP
 			}
 
 			if optionCancelAfterXUpdates > 0 && priceIteration%optionCancelAfterXUpdates == 0 {
