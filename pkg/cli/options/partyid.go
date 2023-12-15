@@ -38,7 +38,7 @@ func NewPartyIdOptions(command *cobra.Command) *PartyIdOptions {
 	command.Flags().StringSliceVar(&opt.partyRoleQualifiers, "party-role-qualifier", []string{}, "Order party role qualifiers")
 	command.Flags().StringSliceVar(&opt.partySubIDs, "party-sub-ids", []string{}, "Order party sub ids (space separated)")
 	command.Flags().StringSliceVar(&opt.partySubIDTypes, "party-sub-id-types", []string{}, "Order party sub id types (space separated)")
-	command.Flags().BoolVar(&opt.copyPartyIDFromConfig, "copy-credentials-fom-config", false, "Copy credentials from config in party id fields")
+	command.Flags().BoolVar(&opt.copyPartyIDFromConfig, "copy-credentials-from-config", false, "Copy credentials from config in party id fields")
 	command.Flags().BoolVar(&opt.traderAsInvestmentDecisionMaker, "trader-as-investor", false, "Use trader party id as investment decision maker")
 
 	command.RegisterFlagCompletionFunc("party-id", cobra.NoFileCompletions)
