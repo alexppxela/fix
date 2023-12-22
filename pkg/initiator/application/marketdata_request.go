@@ -9,7 +9,9 @@ import (
 
 	"github.com/iancoleman/strcase"
 	"github.com/olekukonko/tablewriter"
+	"github.com/quickfixgo/field"
 	"github.com/rs/zerolog"
+	"sylr.dev/fix/pkg/dict"
 
 	"github.com/quickfixgo/enum"
 	"github.com/quickfixgo/quickfix"
@@ -21,16 +23,18 @@ import (
 
 const nilstr = "<nil>"
 
-func NewMarketDataRequest(printData bool) *MarketDataRequest {
+func NewMarketDataRequest(printData, printNews bool) *MarketDataRequest {
 	mdr := MarketDataRequest{
 		Connected:       make(chan interface{}),
 		FromAppMessages: make(chan quickfix.Messagable, 1),
 		router:          quickfix.NewMessageRouter(),
 		printData:       printData,
+		printNews:       printNews,
 	}
 
 	mdr.router.AddRoute(quickfix.ApplVerIDFIX50SP2, string(enum.MsgType_MARKET_DATA_INCREMENTAL_REFRESH), mdr.onMarketDataIncrementalRefresh)
 	mdr.router.AddRoute(quickfix.ApplVerIDFIX50SP2, string(enum.MsgType_MARKET_DATA_SNAPSHOT_FULL_REFRESH), mdr.onMarketDataSnapshotFullRefresh)
+	mdr.router.AddRoute(quickfix.ApplVerIDFIX50SP2, string(enum.MsgType_NEWS), mdr.onNews)
 
 	return &mdr
 }
@@ -45,6 +49,7 @@ type MarketDataRequest struct {
 	mux             sync.RWMutex
 	router          *quickfix.MessageRouter
 	printData       bool
+	printNews       bool
 }
 
 var _ quickfix.Application = (*MarketDataRequest)(nil)
@@ -213,6 +218,98 @@ func (app *MarketDataRequest) onMarketDataIncrementalRefresh(msg *quickfix.Messa
 
 	app.FromAppMessages <- msg
 
+	return nil
+}
+
+func (app *MarketDataRequest) onNews(msg *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
+	if !app.printNews {
+		return nil
+	}
+	fmt.Println("News received")
+
+	headline, err := msg.Body.GetString(tag.Headline)
+	if err != nil {
+		return quickfix.TagNotDefinedForThisMessageType(tag.Headline)
+	}
+	urgencyField := field.UrgencyField{}
+	if err := msg.Body.GetField(tag.Urgency, &urgencyField); err != nil {
+		return quickfix.TagNotDefinedForThisMessageType(tag.Urgency)
+	}
+	urgency, searchErr := dict.SearchValue(dict.Urgencies, urgencyField.Value())
+	if searchErr != nil {
+		return quickfix.ValueIsIncorrect(tag.Urgency)
+	}
+	origTime, err := msg.Body.GetString(tag.OrigTime)
+	if err != nil {
+		return quickfix.TagNotDefinedForThisMessageType(tag.OrigTime)
+	}
+	symGroup := quickfix.NewRepeatingGroup(
+		tag.NoRelatedSym,
+		quickfix.GroupTemplate{
+			quickfix.GroupElement(tag.Symbol),
+			quickfix.GroupElement(tag.SecurityID),
+			quickfix.GroupElement(tag.SecurityIDSource),
+		},
+	)
+	err = msg.Body.GetGroup(symGroup)
+	if err != nil {
+		t := tag.NoRelatedSym
+		return quickfix.NewMessageRejectError("missing RelatedSym repeating group", 16, &t)
+	}
+	symbols := ""
+	for i := 0; i < symGroup.Len(); i++ {
+		s := symGroup.Get(i)
+		securityIdSource := field.SecurityIDSourceField{}
+		if err := s.GetField(tag.SecurityIDSource, &securityIdSource); err != nil {
+			return quickfix.TagNotDefinedForThisMessageType(tag.SecurityIDSource)
+		}
+		if i > 0 {
+			symbols += ", "
+		}
+		if securityIdSource.Value() != enum.SecurityIDSource_EXCHANGE_SYMBOL {
+			securityId, err := s.GetString(tag.SecurityID)
+			if err != nil {
+				return quickfix.TagNotDefinedForThisMessageType(tag.SecurityID)
+			}
+			symbols += fmt.Sprintf("%s (%s)", securityId, securityIdSource.Value())
+		} else {
+			symbol, err := s.GetString(tag.Symbol)
+			if err != nil {
+				return quickfix.TagNotDefinedForThisMessageType(tag.Symbol)
+			}
+			symbols += symbol
+		}
+	}
+	txtGroup := quickfix.NewRepeatingGroup(
+		tag.NoLinesOfText,
+		quickfix.GroupTemplate{
+			quickfix.GroupElement(tag.Text),
+		},
+	)
+	err = msg.Body.GetGroup(txtGroup)
+	if err != nil {
+		t := tag.NoLinesOfText
+		return quickfix.NewMessageRejectError("missing LinesOfText repeating group", 16, &t)
+	}
+	if txtGroup.Len() == 0 {
+		return quickfix.ConditionallyRequiredFieldMissing(tag.Text)
+	}
+
+	fmt.Printf("\t%-9s : %s\n", "Headline", headline)
+	for i := 0; i < txtGroup.Len(); i++ {
+		text, err := txtGroup.Get(i).GetString(tag.Text)
+		if err != nil {
+			return quickfix.ConditionallyRequiredFieldMissing(tag.Text)
+		}
+		if txtGroup.Len() == 1 {
+			fmt.Printf("\t%-9s : %s\n", "Text", text)
+		} else {
+			fmt.Printf("\t%-9s : %s\n", fmt.Sprintf("Text[%d]", i), text)
+		}
+	}
+	fmt.Printf("\t%-9s : %s\n", "Symbols", symbols)
+	fmt.Printf("\t%-9s : %s\n", "Urgency", urgency)
+	fmt.Printf("\t%-9s : %s\n", "Timestamp", origTime)
 	return nil
 }
 
