@@ -7,18 +7,22 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-
-	"github.com/rs/zerolog"
-	"github.com/shopspring/decimal"
+	"time"
 
 	"github.com/artex-io/quickfixgo-fix50sp2/marketdataincrementalrefresh"
 	"github.com/artex-io/quickfixgo-fix50sp2/marketdatasnapshotfullrefresh"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/quickfixgo/enum"
+	"github.com/quickfixgo/field"
+	"github.com/quickfixgo/fixt11"
 	"github.com/quickfixgo/quickfix"
 	"github.com/quickfixgo/tag"
+	"github.com/rs/zerolog"
+	"github.com/shopspring/decimal"
 
 	"sylr.dev/fix/pkg/dict"
+	"sylr.dev/fix/pkg/errors"
 	"sylr.dev/fix/pkg/utils"
 )
 
@@ -86,40 +90,45 @@ var (
 		},
 		[]string{"security"},
 	)
+	metricMarketDataValidatorConnection = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "fix",
+			Subsystem: "marketdata_validator",
+			Name:      "fix_connection",
+			Help:      "Status of the FIX connection",
+		},
+		[]string{"sessionID"},
+	)
 )
 
 func init() {
-	prometheus.MustRegister(metricMarketDataValidatorIncrementalRefreshes)
-	prometheus.MustRegister(metricMarketDataValidatorOrderUpdates)
-	prometheus.MustRegister(metricMarketDataValidatorTradeUpdates)
-	prometheus.MustRegister(metricMarketDataValidatorErrors)
-	prometheus.MustRegister(metricMarketDataValidatorOrders)
-	prometheus.MustRegister(metricMarketDataValidatorBookCrossed)
-	prometheus.MustRegister(metricMarketDataValidatorCrossedUpdates)
+	prometheus.MustRegister(
+		metricMarketDataValidatorIncrementalRefreshes,
+		metricMarketDataValidatorOrderUpdates,
+		metricMarketDataValidatorTradeUpdates,
+		metricMarketDataValidatorErrors,
+		metricMarketDataValidatorOrders,
+		metricMarketDataValidatorBookCrossed,
+		metricMarketDataValidatorCrossedUpdates,
+		metricMarketDataValidatorConnection)
 }
 
-func NewMarketDataValidator(logger *zerolog.Logger, securities []string) *MarketDataValidator {
+func NewMarketDataValidator(logger *zerolog.Logger, options MarketDataValidatorOptions, timeout time.Duration) *MarketDataValidator {
 	mdr := MarketDataValidator{
-		Connected:            make(chan interface{}),
+		AppInfoChan:          make(chan string),
 		SecurityListResponse: make(chan *quickfix.Message),
 		Validator: &Validator{
-			secList: createSecurityList(securities),
+			secList: make(map[string]*Orders),
 			logger:  logger,
 		},
-		router: quickfix.NewMessageRouter(),
+		router:  quickfix.NewMessageRouter(),
+		options: options,
+		timeout: timeout,
 	}
 	mdr.Logger = logger
 
 	mdr.router.AddRoute(marketdataincrementalrefresh.Route(mdr.onMarketDataIncrementalRefresh))
 	mdr.router.AddRoute(marketdatasnapshotfullrefresh.Route(mdr.onMarketDataSnapshotFullRefresh))
-
-	// Initialize error vectors so that we have pre-existing 0 values allowing
-	// to do operations such as delta() when first errors are reported
-	for _, security := range securities {
-		metricMarketDataValidatorErrors.WithLabelValues(security, ErrOrderNotFound.Error()).Add(0)
-		metricMarketDataValidatorErrors.WithLabelValues(security, ErrOrderAlreadyExists.Error()).Add(0)
-		metricMarketDataValidatorCrossedUpdates.WithLabelValues(security).Add(0)
-	}
 
 	return &mdr
 }
@@ -134,29 +143,42 @@ func createSecurityList(securities []string) map[string]*Orders {
 			bestBuyOrder:  &Order{},
 			bestSellOrder: &Order{},
 		}
+
+		// Initialize error vectors so that we have pre-existing 0 values allowing
+		// to do operations such as delta() when first errors are reported
+		cleanSecurityMetrics(security)
 	}
 	return secs
+}
+
+func cleanSecurityMetrics(security string) {
+	metricMarketDataValidatorErrors.WithLabelValues(security, ErrOrderNotFound.Error()).Add(0)
+	metricMarketDataValidatorErrors.WithLabelValues(security, ErrOrderAlreadyExists.Error()).Add(0)
+	metricMarketDataValidatorCrossedUpdates.WithLabelValues(security).Add(0)
+}
+
+type MarketDataValidatorOptions struct {
+	Symbols          []string
+	TradeHistory     bool
+	ExitOnDisconnect bool
 }
 
 type MarketDataValidator struct {
 	utils.QuickFixAppMessageLogger
 
 	Settings             *quickfix.Settings
-	Connected            chan interface{}
+	AppInfoChan          chan string
 	SecurityListResponse chan *quickfix.Message
 	stopped              bool
 	mux                  sync.RWMutex
 	router               *quickfix.MessageRouter
+	options              MarketDataValidatorOptions
+	timeout              time.Duration
 
 	Validator *Validator
 }
 
 var _ quickfix.Application = (*MarketDataValidator)(nil)
-
-// UpdateSecurityList must be called before subscribing to market data to refresh the list of securities
-func (app *MarketDataValidator) UpdateSecurityList(securities []string) {
-	app.Validator.secList = createSecurityList(securities)
-}
 
 // Stop ensures the app chans are emptied so that quickfix can carry on with
 // the LOGOUT process correctly.
@@ -167,25 +189,46 @@ func (app *MarketDataValidator) Stop() {
 	defer app.mux.Unlock()
 
 	app.stopped = true
+	close(app.AppInfoChan)
 }
 
 // Notification of a session begin created.
 func (app *MarketDataValidator) OnCreate(sessionID quickfix.SessionID) {
 	app.Logger.Debug().Msgf("New session: %s", sessionID)
+	metricMarketDataValidatorConnection.WithLabelValues(sessionID.String()).Set(0)
 }
 
 // Notification of a session successfully logging on.
 func (app *MarketDataValidator) OnLogon(sessionID quickfix.SessionID) {
 	app.Logger.Debug().Msgf("Logon: %s", sessionID)
+	metricMarketDataValidatorConnection.WithLabelValues(sessionID.String()).Set(1)
 
-	app.Connected <- struct{}{}
+	app.AppInfoChan <- "Connected"
+	go func() {
+		if err := app.subscribe(sessionID); err != nil {
+			app.Logger.Error().Err(err).Msgf("Error while subscribing")
+			panic(err)
+		}
+	}()
 }
 
 // Notification of a session logging off or disconnecting.
 func (app *MarketDataValidator) OnLogout(sessionID quickfix.SessionID) {
 	app.Logger.Debug().Msgf("Logout: %s", sessionID)
+	if app.stopped {
+		return
+	}
+	metricMarketDataValidatorConnection.WithLabelValues(sessionID.String()).Set(0)
 
-	close(app.Connected)
+	for security, _ := range app.Validator.secList {
+		cleanSecurityMetrics(security)
+		delete(app.Validator.secList, security)
+	}
+
+	app.AppInfoChan <- "Disconnected"
+	if app.options.ExitOnDisconnect {
+		close(app.AppInfoChan)
+	}
 }
 
 // Notification of admin message being sent to target.
@@ -243,7 +286,7 @@ func (app *MarketDataValidator) FromApp(message *quickfix.Message, sessionID qui
 
 	switch msgType {
 	case string(enum.MsgType_BUSINESS_MESSAGE_REJECT):
-		app.Connected <- struct{}{}
+		app.AppInfoChan <- "Received BusinessMessageReject"
 		return nil
 	case string(enum.MsgType_SECURITY_LIST):
 		app.SecurityListResponse <- message
@@ -477,6 +520,110 @@ func (app *MarketDataValidator) onMarketDataIncrementalRefresh(msg marketdatainc
 	}
 
 	return nil
+}
+
+func (app *MarketDataValidator) subscribe(sessionId quickfix.SessionID) error {
+	// Prepare market data request
+	marketDataRequest, err := app.buildSubscriptionMessage(sessionId)
+	if err != nil {
+		return err
+	}
+
+	// Send the order
+	err = quickfix.SendToTarget(marketDataRequest, sessionId)
+	if err != nil {
+		panic(err)
+	}
+	return nil
+}
+
+func (app *MarketDataValidator) buildSubscriptionMessage(sessionId quickfix.SessionID) (quickfix.Messagable, error) {
+	mdReqID := field.NewMDReqID(uuid.NewString())
+	subReqType := field.NewSubscriptionRequestType(enum.SubscriptionRequestType_SNAPSHOT_PLUS_UPDATES)
+	marketDepth := field.NewMarketDepth(0)
+
+	// Message
+	message := quickfix.NewMessage()
+	header := fixt11.NewHeader(&message.Header)
+
+	header.Set(field.NewMsgType(enum.MsgType_MARKET_DATA_REQUEST))
+	message.Body.Set(mdReqID)
+	message.Body.Set(subReqType)
+	message.Body.Set(marketDepth)
+	message.Body.Set(field.NewMDUpdateType(enum.MDUpdateType_INCREMENTAL_REFRESH))
+
+	entryTypes := quickfix.NewRepeatingGroup(
+		tag.NoMDEntryTypes,
+		quickfix.GroupTemplate{quickfix.GroupElement(tag.MDEntryType)},
+	)
+
+	entryTypes.Add().Set(field.NewMDEntryType(enum.MDEntryType_BID))
+	entryTypes.Add().Set(field.NewMDEntryType(enum.MDEntryType_OFFER))
+	entryTypes.Add().Set(field.NewMDEntryType(enum.MDEntryType_TRADE))
+	if app.options.TradeHistory {
+		entryTypes.Add().Set(field.NewMDEntryType("101"))
+	}
+
+	message.Body.SetGroup(entryTypes)
+
+	relatedSym := quickfix.NewRepeatingGroup(
+		tag.NoRelatedSym,
+		quickfix.GroupTemplate{quickfix.GroupElement(tag.Symbol)},
+	)
+
+	if len(app.options.Symbols) == 0 {
+		if _, err := app.loadSymbolsFromFix(sessionId); err != nil {
+			return nil, err
+		}
+	} else {
+		app.Validator.secList = createSecurityList(app.options.Symbols)
+	}
+	for symbol, _ := range app.Validator.secList {
+		relatedSym.Add().Set(field.NewSymbol(symbol))
+	}
+	message.Body.SetGroup(relatedSym)
+	return message, nil
+}
+
+func (app *MarketDataValidator) loadSymbolsFromFix(sessionId quickfix.SessionID) ([]string, error) {
+	req, err := BuildSecurityListRequestFix50Sp2Message("symbol")
+	if err != nil {
+		return nil, err
+	}
+
+	// Send the order
+	err = quickfix.SendToTarget(req, sessionId)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait for the security list response
+	var responseMessage *quickfix.Message
+
+	select {
+	case <-time.After(app.timeout):
+		return nil, errors.ResponseTimeout
+	case responseMessage = <-app.SecurityListResponse:
+	}
+
+	symbols := quickfix.NewRepeatingGroup(
+		tag.NoRelatedSym,
+		quickfix.GroupTemplate{
+			quickfix.GroupElement(tag.Symbol),
+		})
+	if err := responseMessage.Body.GetGroup(symbols); err != nil {
+		return nil, err
+	}
+	securities := make([]string, symbols.Len())
+	for i := 0; i < symbols.Len(); i++ {
+		if symbol, err := symbols.Get(i).GetString(tag.Symbol); err != nil {
+			return nil, fmt.Errorf("error while getting symbol: %s", err)
+		} else {
+			securities[i] = symbol
+		}
+	}
+	app.Validator.secList = createSecurityList(securities)
+	return securities, nil
 }
 
 var (

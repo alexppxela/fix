@@ -6,13 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/quickfixgo/field"
+	"github.com/quickfixgo/quickfix"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
-
-	"github.com/quickfixgo/enum"
-	"github.com/quickfixgo/field"
-	"github.com/quickfixgo/fixt11"
-	"github.com/quickfixgo/quickfix"
 
 	"sylr.dev/fix/config"
 	"sylr.dev/fix/pkg/cli/complete"
@@ -156,25 +153,19 @@ func Execute(cmd *cobra.Command, args []string) error {
 }
 
 func BuildMessage(session config.Session) (quickfix.Messagable, error) {
-	etype, err := dict.SecurityListRequestTypeStringToEnum(optionType)
-	if err != nil {
-		return nil, err
-	}
-
-	stype := field.NewSecurityListRequestType(etype)
-	reqid := field.NewSecurityReqID(string(enum.SecurityRequestType_SYMBOL))
-
-	// Message
-	message := quickfix.NewMessage()
-	header := fixt11.NewHeader(&message.Header)
+	var message *quickfix.Message
 
 	switch session.BeginString {
 	case quickfix.BeginStringFIXT11:
 		switch session.DefaultApplVerID {
 		case "FIX.5.0SP2":
-			header.Set(field.NewMsgType("x"))
-			message.Body.Set(reqid)
-			message.Body.Set(stype)
+			var err error
+			if message, err = application.BuildSecurityListRequestFix50Sp2Message(optionType); err != nil {
+				return nil, err
+			}
+			if message == nil {
+				return nil, fmt.Errorf("cannot create SecurityListRequest message")
+			}
 		default:
 			return nil, errors.FixVersionNotImplemented
 		}

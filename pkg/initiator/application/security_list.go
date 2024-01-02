@@ -3,11 +3,12 @@ package application
 import (
 	"sync"
 
-	"github.com/rs/zerolog"
-
 	"github.com/quickfixgo/enum"
+	"github.com/quickfixgo/field"
+	"github.com/quickfixgo/fixt11"
 	"github.com/quickfixgo/quickfix"
 	"github.com/quickfixgo/tag"
+	"github.com/rs/zerolog"
 
 	"sylr.dev/fix/pkg/dict"
 	"sylr.dev/fix/pkg/utils"
@@ -158,4 +159,18 @@ func (app *SecurityList) FromApp(message *quickfix.Message, sessionID quickfix.S
 	}
 
 	return nil
+}
+
+func BuildSecurityListRequestFix50Sp2Message(secType string) (*quickfix.Message, error) {
+	eType, err := dict.SecurityListRequestTypeStringToEnum(secType)
+	if err != nil {
+		return nil, err
+	}
+
+	message := quickfix.NewMessage()
+	header := fixt11.NewHeader(&message.Header)
+	header.Set(field.NewMsgType("x"))
+	message.Body.Set(field.NewSecurityReqID(string(enum.SecurityRequestType_SYMBOL)))
+	message.Body.Set(field.NewSecurityListRequestType(eType))
+	return message, nil
 }
