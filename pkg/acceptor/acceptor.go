@@ -1,6 +1,7 @@
 package acceptor
 
 import (
+	"github.com/quickfixgo/quickfix/store/sql"
 	"github.com/rs/zerolog"
 
 	"github.com/quickfixgo/quickfix"
@@ -19,7 +20,7 @@ func NewAcceptor(app quickfix.Application, settings *quickfix.Settings, logger *
 		switch driver {
 		case "sqlite3":
 		case "postgres":
-			msgStoreFactory = quickfix.NewSQLStoreFactory(settings)
+			msgStoreFactory = sql.NewStoreFactory(settings)
 		}
 	}
 
