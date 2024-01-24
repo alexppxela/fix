@@ -16,7 +16,7 @@ import (
 
 func NewSecurityList() *SecurityList {
 	sl := SecurityList{
-		Connected:       make(chan interface{}),
+		Connected:       make(chan quickfix.SessionID),
 		FromAppMessages: make(chan *quickfix.Message, 1),
 	}
 
@@ -27,7 +27,7 @@ type SecurityList struct {
 	utils.QuickFixAppMessageLogger
 
 	Settings        *quickfix.Settings
-	Connected       chan interface{}
+	Connected       chan quickfix.SessionID
 	FromAppMessages chan *quickfix.Message
 	stopped         bool
 	mux             sync.RWMutex
@@ -58,7 +58,7 @@ func (app *SecurityList) OnCreate(sessionID quickfix.SessionID) {
 func (app *SecurityList) OnLogon(sessionID quickfix.SessionID) {
 	app.Logger.Debug().Msgf("Logon: %s", sessionID)
 
-	app.Connected <- struct{}{}
+	app.Connected <- sessionID
 }
 
 // Notification of a session logging off or disconnecting.

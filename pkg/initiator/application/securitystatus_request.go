@@ -15,7 +15,7 @@ import (
 
 func NewSecurityStatusRequest() *SecurityStatusRequest {
 	sod := SecurityStatusRequest{
-		Connected:       make(chan interface{}),
+		Connected:       make(chan quickfix.SessionID),
 		FromAppMessages: make(chan *quickfix.Message, 1),
 	}
 
@@ -26,7 +26,7 @@ type SecurityStatusRequest struct {
 	utils.QuickFixAppMessageLogger
 
 	Settings        *quickfix.Settings
-	Connected       chan interface{}
+	Connected       chan quickfix.SessionID
 	FromAppMessages chan *quickfix.Message
 	stopped         bool
 	mux             sync.RWMutex
@@ -57,7 +57,7 @@ func (app *SecurityStatusRequest) OnCreate(sessionID quickfix.SessionID) {
 func (app *SecurityStatusRequest) OnLogon(sessionID quickfix.SessionID) {
 	app.Logger.Debug().Msgf("Logon: %s", sessionID)
 
-	app.Connected <- struct{}{}
+	app.Connected <- sessionID
 }
 
 // Notification of a session logging off or disconnecting.

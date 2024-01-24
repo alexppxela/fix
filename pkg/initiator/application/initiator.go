@@ -14,7 +14,7 @@ import (
 
 func NewInitiator() *Initiator {
 	sl := Initiator{
-		Connected:       make(chan interface{}),
+		Connected:       make(chan quickfix.SessionID),
 		FromAppMessages: make(chan *quickfix.Message, 1),
 		ToAppMessages:   make(chan *quickfix.Message, 1),
 	}
@@ -28,7 +28,7 @@ type Initiator struct {
 	SessionID quickfix.SessionID
 
 	Settings        *quickfix.Settings
-	Connected       chan interface{}
+	Connected       chan quickfix.SessionID
 	FromAppMessages chan *quickfix.Message
 	ToAppMessages   chan *quickfix.Message
 	stopped         bool
@@ -64,7 +64,7 @@ func (app *Initiator) OnCreate(sessionID quickfix.SessionID) {
 func (app *Initiator) OnLogon(sessionID quickfix.SessionID) {
 	app.Logger.Debug().Msgf("Logon: %s", sessionID)
 
-	app.Connected <- struct{}{}
+	app.Connected <- sessionID
 }
 
 // Notification of a session logging off or disconnecting.

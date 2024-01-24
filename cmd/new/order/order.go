@@ -193,10 +193,12 @@ func Execute(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Wait for session connection
+	var sessionId quickfix.SessionID
+	var ok bool
 	select {
 	case <-time.After(timeout):
 		return errors.ConnectionTimeout
-	case _, ok := <-app.Connected:
+	case sessionId, ok = <-app.Connected:
 		if !ok {
 			return errors.FixLogout
 		}
@@ -209,7 +211,7 @@ func Execute(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send the order
-	err = quickfix.Send(order)
+	err = quickfix.SendToTarget(order, sessionId)
 	if err != nil {
 		return err
 	}
@@ -251,7 +253,7 @@ LOOP:
 			}
 
 			// Send the order
-			err = quickfix.Send(orderUpdateMsg)
+			err = quickfix.SendToTarget(orderUpdateMsg, sessionId)
 			if err != nil {
 				return err
 			}
@@ -342,11 +344,6 @@ func buildMessage(session config.Session) (quickfix.Messagable, error) {
 		return nil, errors.FixVersionNotImplemented
 	}
 
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetCompID, field.NewTargetCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetSubID, field.NewTargetSubID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderCompID, field.NewSenderCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderSubID, field.NewSenderSubID)
-
 	message.Body.Set(field.NewSymbol(optionOrderSymbol))
 	message.Body.Set(field.NewOrderQty(decimal.NewFromInt(optionOrderQuantity), 2))
 	message.Body.Set(field.NewTimeInForce(eExpiry))
@@ -430,11 +427,6 @@ func buildCancelReplaceMessage(session config.Session, executionReport *quickfix
 	default:
 		return nil, errors.FixVersionNotImplemented
 	}
-
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetCompID, field.NewTargetCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetSubID, field.NewTargetSubID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderCompID, field.NewSenderCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderSubID, field.NewSenderSubID)
 
 	return message, nil
 }

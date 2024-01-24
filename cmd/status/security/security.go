@@ -152,23 +152,25 @@ func Execute(cmd *cobra.Command, args []string) error {
 	}
 
 	// Wait for session connection
+	var sessionId quickfix.SessionID
+	var ok bool
 	select {
 	case <-time.After(timeout):
 		return errors.ConnectionTimeout
-	case _, ok := <-app.Connected:
+	case sessionId, ok = <-app.Connected:
 		if !ok {
 			return errors.FixLogout
 		}
 	}
 
 	// Prepare security Status Request
-	tssr, err := buildMessage(*session)
+	ssr, err := buildMessage()
 	if err != nil {
 		return err
 	}
 
 	// Send the security status request
-	err = quickfix.Send(tssr)
+	err = quickfix.SendToTarget(ssr, sessionId)
 	if err != nil {
 		return err
 	}
@@ -200,16 +202,11 @@ LOOP:
 	return nil
 }
 
-func buildMessage(session config.Session) (quickfix.Messagable, error) {
+func buildMessage() (quickfix.Messagable, error) {
 	// Message
 	message := quickfix.NewMessage()
 	header := fixt11.NewHeader(&message.Header)
 	header.Set(field.NewMsgType(enum.MsgType_SECURITY_STATUS_REQUEST))
-
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetCompID, field.NewTargetCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetSubID, field.NewTargetSubID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderCompID, field.NewSenderCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderSubID, field.NewSenderSubID)
 
 	utils.QuickFixMessagePartSetString(&message.Body, optionSecurityStatReqID, field.NewSecurityStatusReqID)
 	utils.QuickFixMessagePartSetString(&message.Body, optionSymbol, field.NewSymbol)

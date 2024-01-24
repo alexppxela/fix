@@ -25,7 +25,7 @@ const nilstr = "<nil>"
 
 func NewMarketDataRequest(printData, printNews bool) *MarketDataRequest {
 	mdr := MarketDataRequest{
-		Connected:       make(chan interface{}),
+		Connected:       make(chan quickfix.SessionID),
 		FromAppMessages: make(chan quickfix.Messagable, 1),
 		router:          quickfix.NewMessageRouter(),
 		printData:       printData,
@@ -43,7 +43,7 @@ type MarketDataRequest struct {
 	utils.QuickFixAppMessageLogger
 
 	Settings        *quickfix.Settings
-	Connected       chan interface{}
+	Connected       chan quickfix.SessionID
 	FromAppMessages chan quickfix.Messagable
 	stopped         bool
 	mux             sync.RWMutex
@@ -79,7 +79,7 @@ func (app *MarketDataRequest) OnCreate(sessionID quickfix.SessionID) {
 func (app *MarketDataRequest) OnLogon(sessionID quickfix.SessionID) {
 	app.Logger.Debug().Msgf("Logon: %s", sessionID)
 
-	app.Connected <- struct{}{}
+	app.Connected <- sessionID
 }
 
 // Notification of a session logging off or disconnecting.

@@ -122,7 +122,7 @@ func (app *Acceptor) FromApp(message *quickfix.Message, sessionID quickfix.Sessi
 	return app.router.Route(message, sessionID)
 }
 
-func (app *Acceptor) onNewOrderSingle(order *quickfix.Message, sessionID quickfix.SessionID) quickfix.MessageRejectError {
+func (app *Acceptor) onNewOrderSingle(order *quickfix.Message, _ quickfix.SessionID) quickfix.MessageRejectError {
 	symbol, ferr := order.Body.GetString(tag.Symbol)
 	if ferr != nil {
 		return ferr
@@ -158,7 +158,7 @@ func (app *Acceptor) onNewOrderSingle(order *quickfix.Message, sessionID quickfi
 		return quickfix.NewMessageRejectError(err.Error(), int(tag.BusinessRejectReason), nil)
 	}
 
-	err = app.sendExecutionReport(order, enum.OrdStatus(enum.OrdStatus_NEW))
+	err = app.sendExecutionReport(order, enum.OrdStatus_NEW)
 	if err != nil {
 		return quickfix.NewMessageRejectError(err.Error(), int(tag.BusinessRejectReason), nil)
 	}
@@ -166,7 +166,7 @@ func (app *Acceptor) onNewOrderSingle(order *quickfix.Message, sessionID quickfi
 	return nil
 }
 
-func (a *Acceptor) sendExecutionReport(order *quickfix.Message, status enum.OrdStatus) error {
+func (app *Acceptor) sendExecutionReport(order *quickfix.Message, status enum.OrdStatus) error {
 	message := quickfix.NewMessage()
 	header := fixt11.NewHeader(&message.Header)
 
@@ -176,7 +176,7 @@ func (a *Acceptor) sendExecutionReport(order *quickfix.Message, status enum.OrdS
 	utils.QuickFixMessagePartSetString(&header, utils.MustNot(order.Header.GetString(tag.TargetCompID)), field.NewSenderCompID)
 	utils.QuickFixMessagePartSetString(&header, utils.MustNot(order.Header.GetString(tag.TargetSubID)), field.NewSenderSubID)
 
-	utils.QuickFixMessagePartSetString(&message.Body, (utils.MustNot(order.Body.GetString(tag.ClOrdID))), field.NewOrderID)
+	utils.QuickFixMessagePartSetString(&message.Body, utils.MustNot(order.Body.GetString(tag.ClOrdID)), field.NewOrderID)
 	utils.QuickFixMessagePartSetString(&message.Body, "0", field.NewExecID)
 	utils.QuickFixMessagePartSetString(&message.Body, enum.ExecType(status), field.NewExecType)
 	utils.QuickFixMessagePartSetString(&message.Body, status, field.NewOrdStatus)

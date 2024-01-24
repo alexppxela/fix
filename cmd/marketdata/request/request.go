@@ -171,10 +171,12 @@ func Execute(cmd *cobra.Command, args []string) error {
 	}
 
 	// Wait for session connection
+	var sessionId quickfix.SessionID
+	var ok bool
 	select {
 	case <-time.After(timeout):
 		return errors.ConnectionTimeout
-	case _, ok := <-app.Connected:
+	case sessionId, ok = <-app.Connected:
 		if !ok {
 			return errors.FixLogout
 		}
@@ -187,7 +189,7 @@ func Execute(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send the order
-	err = quickfix.Send(securitylist)
+	err = quickfix.SendToTarget(securitylist, sessionId)
 	if err != nil {
 		return err
 	}

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quickfixgo/field"
 	"github.com/quickfixgo/quickfix"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -118,23 +117,25 @@ func Execute(cmd *cobra.Command, args []string) error {
 	}
 
 	// Wait for session connection
+	var sessionId quickfix.SessionID
+	var ok bool
 	select {
 	case <-time.After(timeout):
 		return errors.ConnectionTimeout
-	case _, ok := <-app.Connected:
+	case sessionId, ok = <-app.Connected:
 		if !ok {
 			return errors.FixLogout
 		}
 	}
 
 	// Prepare securitylist
-	securitylist, err := BuildMessage(*session)
+	securitylist, err := BuildMessage(sessionId)
 	if err != nil {
 		return err
 	}
 
 	// Send the order
-	err = quickfix.Send(securitylist)
+	err = quickfix.SendToTarget(securitylist, sessionId)
 	if err != nil {
 		return err
 	}
@@ -152,31 +153,11 @@ func Execute(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func BuildMessage(session config.Session) (quickfix.Messagable, error) {
-	var message *quickfix.Message
-
-	switch session.BeginString {
+func BuildMessage(sessionId quickfix.SessionID) (quickfix.Messagable, error) {
+	switch sessionId.BeginString {
 	case quickfix.BeginStringFIXT11:
-		switch session.DefaultApplVerID {
-		case "FIX.5.0SP2":
-			var err error
-			if message, err = application.BuildSecurityListRequestFix50Sp2Message(optionType); err != nil {
-				return nil, err
-			}
-			if message == nil {
-				return nil, fmt.Errorf("cannot create SecurityListRequest message")
-			}
-		default:
-			return nil, errors.FixVersionNotImplemented
-		}
+		return application.BuildSecurityListRequestFix50Sp2Message(optionType)
 	default:
 		return nil, errors.FixVersionNotImplemented
 	}
-
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetCompID, field.NewTargetCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetSubID, field.NewTargetSubID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderCompID, field.NewSenderCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderSubID, field.NewSenderSubID)
-
-	return message, nil
 }

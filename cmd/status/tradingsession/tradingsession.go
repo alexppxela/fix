@@ -135,29 +135,30 @@ func Execute(cmd *cobra.Command, args []string) error {
 	}
 
 	// Wait for session connection
+	var sessionId quickfix.SessionID
+	var ok bool
 	select {
 	case <-time.After(timeout):
 		return errors.ConnectionTimeout
-	case _, ok := <-app.Connected:
+	case sessionId, ok = <-app.Connected:
 		if !ok {
 			return errors.FixLogout
 		}
 	}
 
 	// Prepare Trading Session Status Request
-	tssr, err := buildMessage(*session)
+	tssr, err := buildMessage()
 	if err != nil {
 		return err
 	}
 
 	// Send the trading session status request
-	err = quickfix.Send(tssr)
+	err = quickfix.SendToTarget(tssr, sessionId)
 	if err != nil {
 		return err
 	}
 
 	// Wait for the order response
-	var ok bool
 	var responseMessage *quickfix.Message
 
 	select {
@@ -175,16 +176,11 @@ func Execute(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func buildMessage(session config.Session) (quickfix.Messagable, error) {
+func buildMessage() (quickfix.Messagable, error) {
 	// Message
 	message := quickfix.NewMessage()
 	header := fixt11.NewHeader(&message.Header)
 	header.Set(field.NewMsgType(enum.MsgType_TRADING_SESSION_STATUS_REQUEST))
-
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetCompID, field.NewTargetCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetSubID, field.NewTargetSubID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderCompID, field.NewSenderCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderSubID, field.NewSenderSubID)
 
 	utils.QuickFixMessagePartSetString(&message.Body, dict.SubscriptionRequestTypes[strings.ToUpper(optionSubType)], field.NewSubscriptionRequestType)
 

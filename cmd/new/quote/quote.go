@@ -177,10 +177,12 @@ func Execute(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Wait for session connection
+	var sessionId quickfix.SessionID
+	var ok bool
 	select {
 	case <-time.After(timeout):
 		return errors.ConnectionTimeout
-	case _, ok := <-app.Connected:
+	case sessionId, ok = <-app.Connected:
 		if !ok {
 			return errors.FixLogout
 		}
@@ -193,7 +195,7 @@ func Execute(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send the quote
-	err = quickfix.Send(quote)
+	err = quickfix.SendToTarget(quote, sessionId)
 	if err != nil {
 		return err
 	}
@@ -234,7 +236,7 @@ LOOP:
 					if err != nil {
 						return err
 					}
-					err = quickfix.Send(cancelMsg)
+					err = quickfix.SendToTarget(cancelMsg, sessionId)
 					if err != nil {
 						return err
 					}
@@ -255,7 +257,7 @@ LOOP:
 				}
 
 				// Send the cancellation
-				err = quickfix.Send(quoteMsg)
+				err = quickfix.SendToTarget(quoteMsg, sessionId)
 				if err != nil {
 					return err
 				}
@@ -268,7 +270,7 @@ LOOP:
 			}
 
 			// Send the quote
-			err = quickfix.Send(quoteMsg)
+			err = quickfix.SendToTarget(quoteMsg, sessionId)
 			if err != nil {
 				return err
 			}
@@ -336,11 +338,6 @@ func buildMessage(session config.Session) (quickfix.Messagable, error) {
 		return nil, errors.FixVersionNotImplemented
 	}
 
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetCompID, field.NewTargetCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetSubID, field.NewTargetSubID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderCompID, field.NewSenderCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderSubID, field.NewSenderSubID)
-
 	message.Body.Set(field.NewSymbol(optionSymbol))
 	if optionAutoPriceUpdate {
 		priceAdjustment := 0.01 * float64(priceIteration%100)
@@ -393,11 +390,6 @@ func buildCancelMessage(session config.Session) (quickfix.Messagable, error) {
 	default:
 		return nil, errors.FixVersionNotImplemented
 	}
-
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetCompID, field.NewTargetCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.TargetSubID, field.NewTargetSubID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderCompID, field.NewSenderCompID)
-	utils.QuickFixMessagePartSetString(&message.Header, session.SenderSubID, field.NewSenderSubID)
 
 	message.Body.Set(field.NewQuoteCancelType(enum.QuoteCancelType_CANCEL_FOR_ONE_OR_MORE_SECURITIES))
 	instruments := quickfix.NewRepeatingGroup(tag.NoQuoteEntries, nil)
